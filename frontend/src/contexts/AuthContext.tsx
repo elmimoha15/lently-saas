@@ -2,7 +2,8 @@
  * Auth Context
  * 
  * Provides authentication state and methods throughout the app.
- * Handles Firebase auth state synchronization and user data loading.
+ * Handles Firebase auth state synchronization, user data loading, and token management.
+ * Includes automatic logout on token expiration for security.
  */
 
 import React, {
@@ -14,6 +15,8 @@ import React, {
   useMemo,
 } from 'react';
 import { User as FirebaseUser } from 'firebase/auth';
+import { useNavigate } from 'react-router-dom';
+import { tokenManager } from '@/services/token.service';
 import {
   LentlyUser,
   AuthState,
@@ -87,6 +90,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         try {
           const lentlyUser = await getUserDocument(fbUser.uid);
           setUser(lentlyUser);
+          
+          // Start token management for authenticated users
+          tokenManager.start(async () => {
+            console.log('[Auth] Token expired, logging out user');
+            await signOut();
+          });
         } catch (err) {
           console.error('Error fetching user data:', err);
           setError({
@@ -96,15 +105,19 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           });
         }
       } else {
-        // User is signed out
+        // User is signed out - stop token management
         setUser(null);
+        tokenManager.stop();
       }
 
       setIsLoading(false);
       setIsInitialized(true);
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      tokenManager.stop();
+    };
   }, []);
 
   // ============================================================================
@@ -154,12 +167,16 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setError(null);
 
     try {
+      // Stop token management before signing out
+      tokenManager.stop();
+      
       const result = await authSignOut();
 
       if (result.error) {
         setError(result.error);
       } else {
         setUser(null);
+        setFirebaseUser(null);
       }
     } finally {
       setIsLoading(false);

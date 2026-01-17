@@ -506,13 +506,20 @@ class AskAIService:
             result = []
             for doc in conversations:
                 data = doc.to_dict()
+                messages = data.get("messages", [])
+                last_message = messages[-1].get("content", "")[:150] if messages else ""
+                
+                # Ensure dates are properly serialized
+                created_at = data.get("created_at")
+                updated_at = data.get("updated_at")
+                
                 result.append({
                     "conversation_id": data.get("conversation_id"),
                     "video_id": data.get("video_id"),
                     "question_count": data.get("question_count", 0),
-                    "created_at": data.get("created_at"),
-                    "updated_at": data.get("updated_at"),
-                    "last_message": data.get("messages", [{}])[-1].get("content", "")[:100] if data.get("messages") else ""
+                    "created_at": created_at.isoformat() if hasattr(created_at, 'isoformat') else str(created_at),
+                    "updated_at": updated_at.isoformat() if hasattr(updated_at, 'isoformat') else str(updated_at),
+                    "last_message": last_message
                 })
             
             return result

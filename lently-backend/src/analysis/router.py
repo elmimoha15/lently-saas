@@ -26,24 +26,23 @@ from src.youtube.exceptions import (
 )
 from src.gemini.exceptions import RateLimitError, GeminiError
 from src.firebase_init import get_firestore
+from src.billing.service import BillingService
+from src.billing.schemas import UsageType
 from google.cloud.firestore import SERVER_TIMESTAMP
 
 router = APIRouter(prefix="/api/analysis", tags=["Analysis"])
 logger = logging.getLogger(__name__)
 
 
-async def _increment_usage(user_id: str):
-    """Increment video analysis count for user"""
+async def _increment_video_usage(user_id: str, comments_analyzed: int = 0):
+    """Increment video analysis count using billing service"""
     try:
-        db = get_firestore()
-        user_ref = db.collection("users").document(user_id)
-        user_ref.update({
-            "usage.videosAnalyzed": user_ref.get().get("usage.videosAnalyzed") + 1 
-            if user_ref.get().exists else 1
-        })
+        billing = BillingService()
+        await billing.increment_usage(user_id, UsageType.VIDEOS, 1)
+        if comments_analyzed > 0:
+            await billing.increment_usage(user_id, UsageType.COMMENTS, comments_analyzed)
     except Exception as e:
-        # Log but don't fail the request
-        logging.warning(f"Failed to increment usage: {e}")
+        logger.warning(f"Failed to increment usage: {e}")
 
 
 @router.post("/start")
@@ -62,19 +61,18 @@ async def start_analysis(
     user_id = user_data["uid"]
     user_plan = user_data.get("plan", "free")
     
-    # Check video quota
-    usage = user_data.get("usage", {})
-    videos_used = usage.get("videosAnalyzedThisMonth", 0)
-    videos_limit = usage.get("videosLimit", 3)
+    # Check video quota using billing service (single source of truth)
+    billing = BillingService()
+    quota_check = await billing.check_quota(user_id, UsageType.VIDEOS, 1)
     
-    if videos_used >= videos_limit:
+    if not quota_check.allowed:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail={
                 "error": "quota_exceeded",
-                "message": f"You've used all {videos_limit} video analyses this month",
-                "current": videos_used,
-                "limit": videos_limit,
+                "message": f"You've used all {quota_check.limit} video analyses this month",
+                "current": quota_check.current,
+                "limit": quota_check.limit,
                 "action": "upgrade"
             }
         )

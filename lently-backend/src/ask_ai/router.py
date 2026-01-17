@@ -14,6 +14,8 @@ from src.ask_ai.schemas import (
 )
 from src.middleware.auth import get_current_user_with_plan
 from src.gemini.exceptions import GeminiError, RateLimitError, ContentFilteredError
+from src.billing.service import BillingService
+from src.billing.schemas import UsageType
 
 router = APIRouter(prefix="/api/ask", tags=["Ask AI"])
 
@@ -46,9 +48,9 @@ async def ask_question(
     
     **Rate Limits by Plan:**
     - Free: 9 questions total/month
-    - Starter: 30 questions per video
-    - Pro: 100 questions per video
-    - Business: Unlimited
+    - Starter: 60 questions per month
+    - Pro: 150 questions per month
+    - Business: 500 questions per month
     
     **Example Questions:**
     - "What are viewers asking about most?"
@@ -59,19 +61,18 @@ async def ask_question(
     user_id = user_data["uid"]
     user_plan = user_data.get("plan", "free")
     
-    # Check question quota
-    usage = user_data.get("usage", {})
-    questions_used = usage.get("questionsUsed", 0)
-    questions_limit = usage.get("questionsLimit", 9)
+    # Check question quota using billing service (single source of truth)
+    billing = BillingService()
+    quota_check = await billing.check_quota(user_id, UsageType.AI_QUESTIONS, 1)
     
-    if questions_used >= questions_limit:
+    if not quota_check.allowed:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail={
                 "error": "quota_exceeded",
-                "message": f"You've used all {questions_limit} AI questions this month",
-                "current": questions_used,
-                "limit": questions_limit,
+                "message": f"You've used all {quota_check.limit} AI questions this month",
+                "current": quota_check.current,
+                "limit": quota_check.limit,
                 "action": "upgrade"
             }
         )
@@ -82,6 +83,10 @@ async def ask_question(
             user_id=user_id,
             user_plan=user_plan
         )
+        
+        # Increment usage after successful question
+        await billing.increment_usage(user_id, UsageType.AI_QUESTIONS, 1)
+        
         return response
         
     except ValueError as e:

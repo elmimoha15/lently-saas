@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { AnalysisProvider } from "@/contexts/AnalysisContext";
+import { BillingProvider } from "@/contexts/BillingContext";
 import { ProtectedRoute, PublicRoute, OnboardingRoute } from "@/components/auth/ProtectedRoute";
 import Index from "./pages/Index";
 import Videos from "./pages/Videos";
@@ -31,8 +32,9 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <AuthProvider>
-          <AnalysisProvider>
-            <Routes>
+          <BillingProvider>
+            <AnalysisProvider>
+              <Routes>
             {/* Public routes - show landing page for unauthenticated users */}
             <Route path="/" element={<Landing />} />
             <Route path="/landing" element={<Landing />} />
@@ -148,10 +150,11 @@ const App = () => (
 
             {/* 404 */}
             <Route path="*" element={<NotFound />} />
-          </Routes>
+            </Routes>
           </AnalysisProvider>
-        </AuthProvider>
-      </BrowserRouter>
+        </BillingProvider>
+      </AuthProvider>
+    </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>
 );

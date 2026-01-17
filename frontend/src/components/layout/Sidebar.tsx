@@ -1,4 +1,4 @@
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { 
   LayoutDashboard, 
@@ -9,9 +9,25 @@ import {
   CreditCard,
   LogOut,
   Flame,
-  Plus
+  Plus,
+  History
 } from 'lucide-react';
-import { currentUser, getPlanBadgeClass } from '@/data/users';
+import { useAuth } from '@/contexts/AuthContext';
+import { useBilling } from '@/contexts/BillingContext';
+
+// Plan badge styling based on plan ID
+const getPlanBadgeClass = (planId: string) => {
+  switch (planId) {
+    case 'business':
+      return 'bg-purple-100 text-purple-700';
+    case 'pro':
+      return 'bg-primary/10 text-primary';
+    case 'starter':
+      return 'bg-blue-100 text-blue-700';
+    default:
+      return 'bg-muted text-muted-foreground';
+  }
+};
 
 const navItems = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
@@ -24,7 +40,13 @@ const navItems = [
 
 export const Sidebar = () => {
   const location = useLocation();
-  const user = currentUser;
+  const navigate = useNavigate();
+  const { user, logout } = useAuth();
+  const { planName, subscription } = useBilling();
+  
+  // Get user display info
+  const displayName = user?.profile?.displayName || user?.email?.split('@')[0] || 'User';
+  const planId = subscription?.plan_id || 'free';
 
   const isActive = (path: string) => {
     if (path === '/dashboard') return location.pathname === '/dashboard';
@@ -92,16 +114,22 @@ export const Sidebar = () => {
       <div className="border-t border-sidebar-border p-4">
         <div className="flex items-center gap-3 p-2 rounded-lg bg-primary/[0.03]">
           <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-white font-semibold text-sm shadow-sm">
-            {user.name.split(' ').map(n => n[0]).join('')}
+            {displayName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold truncate">{user.name}</p>
-            <span className={`inline-block px-2 py-0.5 text-xs font-medium rounded-full mt-0.5 ${getPlanBadgeClass(user.plan)}`}>
-              {user.plan.charAt(0).toUpperCase() + user.plan.slice(1)}
+            <p className="text-sm font-semibold truncate">{displayName}</p>
+            <span className={`inline-block px-2 py-0.5 text-xs font-medium rounded-full mt-0.5 ${getPlanBadgeClass(planId)}`}>
+              {planName}
             </span>
           </div>
         </div>
-        <button className="w-full mt-3 flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-destructive transition-colors rounded-lg hover:bg-destructive/5">
+        <button 
+          onClick={async () => {
+            await logout();
+            navigate('/login');
+          }}
+          className="w-full mt-3 flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-destructive transition-colors rounded-lg hover:bg-destructive/5"
+        >
           <LogOut className="w-4 h-4" />
           <span>Log out</span>
         </button>

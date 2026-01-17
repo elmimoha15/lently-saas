@@ -3,9 +3,11 @@
  * 
  * Centralized API client for communicating with the Lently backend.
  * Automatically attaches Firebase auth tokens to requests.
+ * Includes automatic token refresh and error handling.
  */
 
 import { auth } from '@/lib/firebase';
+import { tokenManager } from './token.service';
 import type {
   StartAnalysisResponse,
   AnalysisResponse,
@@ -48,7 +50,7 @@ interface RequestOptions {
 // ============================================================================
 
 /**
- * Get the current user's Firebase ID token
+ * Get the current user's Firebase ID token with automatic refresh
  * Returns null if user is not authenticated
  */
 const getAuthToken = async (): Promise<string | null> => {
@@ -58,8 +60,9 @@ const getAuthToken = async (): Promise<string | null> => {
   }
 
   try {
-    // Force refresh to ensure token is valid
-    return await currentUser.getIdToken(true);
+    // Use token manager to get fresh token
+    const token = await tokenManager.getToken();
+    return token;
   } catch (error) {
     console.error('Error getting auth token:', error);
     return null;
@@ -393,6 +396,141 @@ export const askAiApi = {
       questions_remaining: number;
       plan: string;
     }>('/api/ask/quota'),
+};
+
+// =============================================================================
+// Billing API - SINGLE SOURCE OF TRUTH
+// =============================================================================
+
+export interface UsageData {
+  videos_used: number;
+  videos_limit: number;
+  videos_remaining: number;
+  ai_questions_used: number;
+  ai_questions_limit: number;
+  ai_questions_remaining: number;
+  comments_per_video_limit: number;
+  period_start: string | null;
+  period_end: string | null;
+  reset_date: string | null;
+  plan_id: string;
+  plan_name: string;
+}
+
+export interface SubscriptionData {
+  plan_id: string;
+  plan_name: string;
+  status: string;
+  billing_cycle: string;
+  price_formatted: string;
+  current_period_end: string | null;
+  cancel_at_period_end: boolean;
+  scheduled_change: { action: string; plan_id: string } | null;
+  update_payment_url: string | null;
+  cancel_url: string | null;
+}
+
+export interface PlanData {
+  id: string;
+  name: string;
+  price_monthly: number;
+  price_monthly_formatted: string;
+  videos_per_month: number;
+  comments_per_video: number;
+  ai_questions_per_month: number;
+  priority_support: boolean;
+  custom_integrations: boolean;
+  unlimited_ai: boolean;
+  paddle_price_id_monthly: string | null;
+}
+
+export interface BillingInfo {
+  subscription: SubscriptionData;
+  usage: UsageData;
+  available_plans: PlanData[];
+  features: {
+    priority_support: boolean;
+    custom_integrations: boolean;
+    unlimited_ai: boolean;
+    max_videos: number;
+    max_comments_per_video: number;
+    max_ai_questions: number;
+  };
+}
+
+export interface QuotaCheckResult {
+  allowed: boolean;
+  usage_type: 'videos' | 'comments' | 'ai_questions';
+  current: number;
+  limit: number;
+  remaining: number;
+  message: string | null;
+  upgrade_required: boolean;
+}
+
+export const billingApi = {
+  /**
+   * Get complete billing info - SINGLE SOURCE OF TRUTH
+   * Use this everywhere to get consistent plan/usage data
+   */
+  getBillingInfo: () => api.get<BillingInfo>('/api/billing/info'),
+
+  /**
+   * Get just usage data
+   */
+  getUsage: () => api.get<UsageData>('/api/billing/usage'),
+
+  /**
+   * Get all available plans
+   */
+  getPlans: () => api.get<PlanData[]>('/api/billing/plans'),
+
+  /**
+   * Check quota before an action
+   */
+  checkQuota: (usageType: 'videos' | 'comments' | 'ai_questions', amount: number = 1) =>
+    api.get<QuotaCheckResult>(`/api/billing/quota/${usageType}?amount=${amount}`),
+
+  /**
+   * Create checkout session for a plan
+   */
+  createCheckout: (planId: string, billingCycle: 'monthly' | 'yearly' = 'monthly') =>
+    api.post<{
+      checkout_url: string | null;
+      transaction_id: string | null;
+      client_token: string | null;
+      price_id: string;
+      customer_email: string;
+    }>('/api/billing/checkout', {
+      plan_id: planId,
+      billing_cycle: billingCycle,
+    }),
+
+  /**
+   * Cancel subscription
+   */
+  cancelSubscription: (atPeriodEnd: boolean = true) =>
+    api.post<{ success: boolean; message: string }>('/api/billing/cancel', null, {
+      headers: { 'Content-Type': 'application/json' },
+    }),
+
+  /**
+   * Sync subscription after checkout (fallback when webhooks unavailable)
+   * This tells the backend to update the user's plan
+   */
+  syncSubscription: (planId: string, transactionId?: string) =>
+    api.post<BillingInfo>('/api/billing/sync-subscription', {
+      plan_id: planId,
+      transaction_id: transactionId,
+    }),
+
+  /**
+   * Link Paddle customer ID to user
+   */
+  linkCustomer: (paddleCustomerId: string) =>
+    api.post<{ success: boolean }>('/api/billing/link-customer', {
+      paddle_customer_id: paddleCustomerId,
+    }),
 };
 
 export default api;

@@ -655,6 +655,22 @@ curl -X POST http://localhost:8000/api/ask/question \
 - [x] Question quota tracking
 - [x] Firestore storage for conversations
 - [x] Suggested questions based on analysis
+- [x] **Conversation History UI** - View and continue past conversations
+- [x] **Backend conversation endpoints** - Persist, fetch, and link conversations to users
+
+**Frontend Features:**
+- `/conversations` page showing all past AI conversations
+- Each conversation displays: video thumbnail, title, last message, question count, timestamp
+- Click any conversation to continue it in the Ask AI page
+- Conversations load seamlessly with full message history
+- "View conversation history" link on Ask AI page
+
+**Backend Features:**
+- `GET /api/ask/conversations` - Fetch user's conversation list
+- `GET /api/ask/conversation/{id}` - Get full conversation with all messages
+- Conversations properly linked to users via Firebase Auth
+- Automatic conversation persistence after each question
+- Date serialization for proper JSON responses
 
 **Next:** Phase 7 - Reply Generator
 

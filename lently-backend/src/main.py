@@ -9,6 +9,7 @@ from src.youtube.router import router as youtube_router
 from src.gemini.router import router as gemini_router
 from src.analysis.router import router as analysis_router
 from src.ask_ai.router import router as ask_ai_router
+from src.billing.router import router as billing_router
 import logging
 
 settings = get_settings()
@@ -59,6 +60,7 @@ app.include_router(youtube_router)
 app.include_router(gemini_router)
 app.include_router(analysis_router)
 app.include_router(ask_ai_router)
+app.include_router(billing_router)
 
 @app.get("/")
 async def root():

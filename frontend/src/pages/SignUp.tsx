@@ -5,7 +5,7 @@
  * Redirects existing users to sign in instead.
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Link, useNavigate } from 'react-router-dom';
 import { Flame, AlertCircle, Loader2, Sparkles, Shield, Zap } from 'lucide-react';
@@ -23,7 +23,18 @@ const SignUp = () => {
   const [isSigningUp, setIsSigningUp] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
-  const { signUpWithGoogle } = useAuth();
+  const { signUpWithGoogle, isAuthenticated, user, isLoading } = useAuth();
+
+  // Auto-redirect when user becomes authenticated after signup
+  useEffect(() => {
+    if (isAuthenticated && user && !isLoading) {
+      // If user just signed up and hasn't completed onboarding, redirect there
+      if (!user.hasCompletedOnboarding) {
+        console.log('New user authenticated, redirecting to onboarding...');
+        navigate('/onboarding', { replace: true });
+      }
+    }
+  }, [isAuthenticated, user, isLoading, navigate]);
 
   const handleGoogleSignUp = async () => {
     setIsSigningUp(true);

@@ -1,16 +1,21 @@
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
-import { ArrowRight, Sparkles, TrendingUp, MessageSquare, HelpCircle } from 'lucide-react';
+import { ArrowRight, Sparkles, TrendingUp, MessageSquare, HelpCircle, Loader2 } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Button } from '@/components/ui/button';
-import { currentUser } from '@/data/users';
 import { getRecentVideos } from '@/data/videos';
 import { UsageCard } from '@/components/dashboard/UsageCard';
 import { VideoTable } from '@/components/dashboard/VideoTable';
+import { useBilling } from '@/contexts/BillingContext';
+import { useAuth } from '@/contexts/AuthContext';
 
 const Dashboard = () => {
-  const user = currentUser;
+  const { user } = useAuth();
+  const { usage, isLoading: billingLoading, planName } = useBilling();
   const recentVideos = getRecentVideos(5);
+
+  // Get user's display name
+  const displayName = user?.profile?.displayName?.split(' ')[0] || 'there';
 
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -39,7 +44,7 @@ const Dashboard = () => {
         <motion.div variants={itemVariants} className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold text-foreground">
-              Welcome back, {user.name.split(' ')[0]}! 👋
+              Welcome back, {displayName}! 👋
             </h1>
             <p className="text-muted-foreground mt-1">
               Here's what's happening with your videos
@@ -53,27 +58,45 @@ const Dashboard = () => {
           </Link>
         </motion.div>
 
-        {/* Usage Cards */}
+        {/* Usage Cards - From Billing Context (Single Source of Truth) */}
         <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <UsageCard
-            title="Videos Analyzed"
-            current={user.usage.videosAnalyzed}
-            limit={user.usage.videosLimit}
-            resetDate={user.usage.resetDate}
-          />
-          <UsageCard
-            title="AI Questions"
-            current={user.usage.aiQuestions}
-            limit={user.usage.aiQuestionsLimit}
-            resetDate={user.usage.resetDate}
-          />
-          <UsageCard
-            title="Comments Analyzed"
-            current={user.usage.commentsAnalyzed}
-            limit={user.usage.commentsLimit}
-            resetDate={user.usage.resetDate}
-            showWarning={user.usage.commentsAnalyzed > user.usage.commentsLimit}
-          />
+          {billingLoading ? (
+            // Loading state for usage cards
+            <>
+              <UsageCardSkeleton />
+              <UsageCardSkeleton />
+              <UsageCardSkeleton />
+            </>
+          ) : usage ? (
+            <>
+              <UsageCard
+                title="Videos Analyzed"
+                current={usage.videos_used}
+                limit={usage.videos_limit}
+                resetDate={usage.reset_date || undefined}
+              />
+              <UsageCard
+                title="AI Questions"
+                current={usage.ai_questions_used}
+                limit={usage.ai_questions_limit}
+                resetDate={usage.reset_date || undefined}
+              />
+              <UsageCard
+                title="Comments per Video"
+                current={0}
+                limit={usage.comments_per_video_limit}
+                resetDate={usage.reset_date || undefined}
+                isPerVideo={true}
+              />
+            </>
+          ) : (
+            // Fallback if no usage data
+            <>
+              <UsageCard title="Videos Analyzed" current={0} limit={3} />
+              <UsageCard title="AI Questions" current={0} limit={9} />
+              <UsageCard title="Comments per Video" current={0} limit={300} isPerVideo={true} />
+            </>
+          )}
         </motion.div>
 
         {/* Recent Videos Table */}
@@ -152,6 +175,15 @@ const QuickStatCard = ({ title, value, icon, trend, isText, accent }: QuickStatC
       <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-primary/5 to-transparent rounded-bl-full" />
     )}
   </motion.div>
+);
+
+// Loading skeleton for usage cards
+const UsageCardSkeleton = () => (
+  <div className="card-premium animate-pulse">
+    <div className="h-4 bg-muted rounded w-1/2 mb-4" />
+    <div className="h-8 bg-muted rounded w-3/4 mb-4" />
+    <div className="h-2 bg-muted rounded w-full" />
+  </div>
 );
 
 export default Dashboard;
