@@ -666,3 +666,136 @@ async def link_paddle_customer(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to link customer"
         )
+
+
+# =============================================================================
+# Usage Analytics - Trends and Insights
+# =============================================================================
+
+@router.get("/analytics")
+async def get_usage_analytics(
+    include_trends: bool = True,
+    days_back: int = 30,
+    user: AuthenticatedUser = Depends(get_current_user)
+):
+    """
+    Get detailed usage analytics including trends and projections.
+    
+    Args:
+        include_trends: Whether to include historical trends
+        days_back: How many days of history to analyze
+    
+    Returns:
+        Usage analytics with trends, projections, and recommendations
+    """
+    try:
+        from .analytics import usage_analytics_service
+        analytics = await usage_analytics_service.get_usage_analytics(
+            user.uid,
+            include_trends=include_trends,
+            days_back=days_back
+        )
+        return analytics
+    except Exception as e:
+        logger.error(f"Error getting analytics: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get usage analytics"
+        )
+
+
+# =============================================================================
+# Admin/Cron Endpoints - For Scheduled Jobs
+# =============================================================================
+
+class ResetRequest(BaseModel):
+    """Request to reset usage"""
+    user_id: Optional[str] = None
+    force: bool = False
+    admin_key: str  # Simple auth for cron jobs
+
+
+@router.post("/admin/reset-usage")
+async def reset_usage(request: ResetRequest):
+    """
+    Reset usage for a user or all users.
+    
+    This endpoint is intended for:
+    1. Cloud Scheduler/Cron jobs (monthly resets)
+    2. Admin manual resets
+    3. Testing
+    
+    Requires admin_key for authentication.
+    """
+    from src.config import get_settings
+    settings = get_settings()
+    
+    # Simple key-based auth for cron jobs
+    # In production, use a secure secret
+    expected_key = settings.jwt_secret_key[:16]  # Use first 16 chars as admin key
+    if request.admin_key != expected_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid admin key"
+        )
+    
+    try:
+        from .reset_scheduler import usage_reset_scheduler
+        
+        if request.user_id:
+            # Reset single user
+            success = await usage_reset_scheduler.reset_user(
+                request.user_id,
+                force=request.force
+            )
+            return {
+                "success": success,
+                "message": f"Usage reset for user {request.user_id}"
+            }
+        else:
+            # Reset all users
+            stats = await usage_reset_scheduler.reset_all_users()
+            return {
+                "success": True,
+                "stats": stats,
+                "message": "Monthly usage reset completed"
+            }
+    except Exception as e:
+        logger.error(f"Error resetting usage: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to reset usage"
+        )
+
+
+@router.get("/admin/users-due-reset")
+async def get_users_due_reset(admin_key: str):
+    """
+    Get list of users whose usage should be reset.
+    
+    Useful for monitoring and debugging.
+    """
+    from src.config import get_settings
+    settings = get_settings()
+    
+    expected_key = settings.jwt_secret_key[:16]
+    if admin_key != expected_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid admin key"
+        )
+    
+    try:
+        from .reset_scheduler import usage_reset_scheduler
+        users = await usage_reset_scheduler.get_users_due_for_reset()
+        return {
+            "count": len(users),
+            "user_ids": users
+        }
+    except Exception as e:
+        logger.error(f"Error getting users due for reset: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get users"
+        )
+

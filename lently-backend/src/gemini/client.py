@@ -190,7 +190,18 @@ class GeminiClient:
             if text.endswith("```"):
                 text = text[:-3]
             
-            return json.loads(text.strip())
+            # Replace invalid escape sequences before parsing
+            # Common issues: \n in text that should be \\n
+            text = text.strip()
+            
+            # Try to fix common escape sequence issues
+            # This handles cases where AI generates text with single backslashes
+            import re
+            # Replace standalone backslashes that aren't part of valid escape sequences
+            # Valid: \n \t \r \b \f \" \\ \/
+            text = re.sub(r'\\(?![ntrfbv"\\/])', r'\\\\', text)
+            
+            return json.loads(text)
             
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse JSON response: {e}")

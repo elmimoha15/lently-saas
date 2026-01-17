@@ -25,6 +25,7 @@ interface ConversationSidebarProps {
   currentConversationId: string | null;
   onLoadConversation: (conversationId: string, videoId: string) => void;
   onNewConversation: () => void;
+  isLoading?: boolean;
 }
 
 export const ConversationSidebar = ({
@@ -36,6 +37,7 @@ export const ConversationSidebar = ({
   currentConversationId,
   onLoadConversation,
   onNewConversation,
+  isLoading = false,
 }: ConversationSidebarProps) => {
   return (
     <div className="h-full flex-shrink-0 flex">
@@ -95,7 +97,23 @@ export const ConversationSidebar = ({
 
             {/* Conversations List - scrollable */}
             <div className="flex-1 overflow-y-auto p-2">
-              {conversations.length === 0 ? (
+              {isLoading ? (
+                // Skeleton loaders
+                <div className="space-y-2">
+                  {[...Array(3)].map((_, i) => (
+                    <div key={i} className="w-full p-3 rounded-lg border border-border animate-pulse">
+                      <div className="w-full h-16 bg-muted rounded-md mb-2" />
+                      <div className="h-4 bg-muted rounded w-3/4 mb-2" />
+                      <div className="h-3 bg-muted rounded w-full mb-1" />
+                      <div className="h-3 bg-muted rounded w-2/3 mb-2" />
+                      <div className="flex gap-2">
+                        <div className="h-3 bg-muted rounded w-16" />
+                        <div className="h-3 bg-muted rounded w-16" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : conversations.length === 0 ? (
                 <div className="text-center py-8 px-4">
                   <MessageSquare className="w-10 h-10 mx-auto mb-3 text-muted-foreground opacity-40" />
                   <p className="text-sm text-muted-foreground mb-1">No conversations yet</p>

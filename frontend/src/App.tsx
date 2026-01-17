@@ -11,7 +11,6 @@ import Index from "./pages/Index";
 import Videos from "./pages/Videos";
 import VideoAnalysis from "./pages/VideoAnalysis";
 import AskAI from "./pages/AskAI";
-import Templates from "./pages/Templates";
 import Settings from "./pages/Settings";
 import Billing from "./pages/Billing";
 import Analyze from "./pages/Analyze";
@@ -116,14 +115,6 @@ const App = () => (
               }
             />
             <Route
-              path="/templates"
-              element={
-                <ProtectedRoute>
-                  <Templates />
-                </ProtectedRoute>
-              }
-            />
-            <Route
               path="/settings"
               element={
                 <ProtectedRoute>
@@ -141,6 +132,14 @@ const App = () => (
             />
             <Route
               path="/analyze"
+              element={
+                <ProtectedRoute>
+                  <Analyze />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/analyze/:videoId"
               element={
                 <ProtectedRoute>
                   <Analyze />

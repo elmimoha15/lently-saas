@@ -51,3 +51,22 @@ htmlcov/
 *.log
 logs/
 lently-backend/*.json
+
+# Sensitive keys and service accounts
+*.key
+*.pem
+*.p12
+*.jks
+serviceAccountKey.json
+google-services.json
+google-services-*.json
+*firebase-adminsdk*.json
+*adminsdk-*.json
+
+# Keep example service account files in the repo
+!lently-backend/*.json.example
+
+# Local dev / firebase
+.firebase/
+.firebaserc
+.firebase_config.json

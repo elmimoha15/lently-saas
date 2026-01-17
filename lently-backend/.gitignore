@@ -1,1 +1,14 @@
 firebase-service-account.json
+# Ignore any Firebase admin/service account keys present in this folder
+*firebase-adminsdk*.json
+*adminsdk-*.json
+service-account*.json
+serviceAccountKey.json
+*.key
+*.pem
+# Keep example files tracked
+!*.json.example
+
+# Environment
+.env
+.env.*

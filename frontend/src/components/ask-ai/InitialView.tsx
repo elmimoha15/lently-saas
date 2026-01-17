@@ -15,6 +15,7 @@ interface InitialViewProps {
   currentConversationId: string | null;
   onLoadConversation: (conversationId: string, videoId: string) => void;
   onNewConversation: () => void;
+  isLoadingConversations?: boolean;
   
   // Video selector props
   selectedVideo: VideoOption | undefined;
@@ -54,6 +55,7 @@ export const InitialView = ({
   currentConversationId,
   onLoadConversation,
   onNewConversation,
+  isLoadingConversations = false,
   selectedVideo,
   selectedVideoId,
   videoOptions,
@@ -83,6 +85,7 @@ export const InitialView = ({
         currentConversationId={currentConversationId}
         onLoadConversation={onLoadConversation}
         onNewConversation={onNewConversation}
+        isLoading={isLoadingConversations}
       />
 
       {/* Background gradient - fixed to cover full area */}

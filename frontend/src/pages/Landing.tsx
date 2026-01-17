@@ -161,7 +161,7 @@ const Landing = () => {
               </Button>
             </Link>
             <p className="text-sm text-muted-foreground mt-4">
-              No credit card required • 3 videos free per month
+              No credit card required • 1 video free per month
             </p>
           </motion.div>
         </div>

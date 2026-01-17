@@ -45,7 +45,7 @@ const AskAI = () => {
   // =========================================================================
 
   // Fetch conversation history list
-  const { data: conversationsData, refetch: refetchConversations } = useQuery({
+  const { data: conversationsData, refetch: refetchConversations, isLoading: isLoadingConversations } = useQuery({
     queryKey: ['conversations'],
     queryFn: async () => {
       const response = await askAiApi.getConversations(50);
@@ -308,6 +308,7 @@ const AskAI = () => {
     currentConversationId: conversationId,
     onLoadConversation: handleLoadConversation,
     onNewConversation: handleNewConversation,
+    isLoadingConversations,
   };
   
   const videoSelectorProps = {

@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import uuid
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from typing import Optional
@@ -371,9 +372,9 @@ async def get_analysis_history(
     user_data: dict = Depends(get_current_user_with_plan)
 ):
     """
-    Get user's analysis history
+    Get user's analysis history including in-progress analyses
     
-    Returns a list of previous analyses with basic info.
+    Returns a list of previous analyses with basic info, plus any currently processing videos.
     """
     user_id = user_data["uid"]
     
@@ -391,12 +392,189 @@ async def get_analysis_history(
         for doc in analyses_ref.stream():
             analyses.append(doc.to_dict())
         
+        # Add currently processing videos from progress manager
+        progress_mgr = get_progress_manager()
+        active_jobs = progress_mgr.get_user_jobs(user_id)
+        
+        for job in active_jobs:
+            # Only include if not yet completed or failed
+            if job.step not in [AnalysisStep.COMPLETED.value, AnalysisStep.FAILED.value]:
+                current_update = job.get_current_update()
+                if current_update:
+                    # Create a processing entry
+                    processing_entry = {
+                        "analysis_id": job.analysis_id,
+                        "video_id": current_update.video_id or "",
+                        "video_title": current_update.video_title or "Processing...",
+                        "video_thumbnail": current_update.video_thumbnail or "",
+                        "status": "processing",
+                        "progress": current_update.progress,
+                        "step": current_update.step,
+                        "step_label": current_update.step_label,
+                        "created_at": datetime.utcnow().isoformat(),
+                        "comments_analyzed": current_update.comments_fetched or 0,
+                    }
+                    analyses.insert(0, processing_entry)  # Add at the top
+        
         return {"analyses": analyses, "count": len(analyses)}
         
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch history: {str(e)}"
+        )
+
+
+@router.post("/async", status_code=status.HTTP_202_ACCEPTED)
+async def submit_async_analysis(
+    request: AnalysisRequest,
+    user_data: dict = Depends(get_current_user_with_plan)
+):
+    """
+    Submit an analysis job for asynchronous processing via Pub/Sub.
+    
+    This endpoint queues the analysis job and returns immediately with a job_id.
+    Use GET /job/{job_id} to check the status of the job.
+    
+    Requires Cloud Pub/Sub to be configured. If Pub/Sub is not available,
+    use POST /start instead for in-memory background processing.
+    
+    Returns:
+        - job_id: Unique identifier for the job
+        - status: Job status (queued)
+        - message: Instructions for tracking progress
+    """
+    from src.pubsub.publisher import JobPublisher
+    
+    user_id = user_data["uid"]
+    
+    # Check video quota using billing service
+    billing = BillingService()
+    quota_check = await billing.check_quota(user_id, UsageType.VIDEOS, 1)
+    
+    if not quota_check.allowed:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "error": "quota_exceeded",
+                "message": f"You've used all {quota_check.limit} video analyses this month",
+                "current": quota_check.current,
+                "limit": quota_check.limit,
+                "action": "upgrade"
+            }
+        )
+    
+    # Publish job to Pub/Sub
+    try:
+        publisher = JobPublisher()
+        job_id = await publisher.publish_analysis_job(
+            user_id=user_id,
+            video_id=request.video_url_or_id,
+            max_comments=request.max_comments,
+            include_sentiment=request.include_sentiment,
+            include_classification=request.include_classification,
+            include_insights=request.include_insights,
+            include_summary=request.include_summary,
+            priority=5  # Default priority
+        )
+        
+        return {
+            "job_id": job_id,
+            "status": "queued",
+            "message": "Analysis job queued. Use GET /job/{job_id} to check status."
+        }
+    except Exception as e:
+        logger.error(f"Failed to submit async analysis: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to queue analysis job: {str(e)}"
+        )
+
+
+@router.get("/job/{job_id}")
+async def get_job_status(
+    job_id: str,
+    user_data: dict = Depends(get_current_user_with_plan)
+):
+    """
+    Get the status of an async analysis job.
+    
+    Returns:
+        - job_id: Job identifier
+        - status: pending/queued/processing/completed/failed
+        - progress: Current progress (0.0-1.0)
+        - current_step: Current processing step
+        - analysis_id: Analysis document ID (when completed)
+        - error_message: Error details (if failed)
+    """
+    from src.pubsub.publisher import JobPublisher
+    
+    user_id = user_data["uid"]
+    
+    try:
+        publisher = JobPublisher()
+        job_status = await publisher.get_job_status(job_id)
+        
+        if not job_status:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Job not found"
+            )
+        
+        # Verify ownership
+        if job_status.get('user_id') != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied"
+            )
+        
+        return job_status
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get job status: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get job status: {str(e)}"
+        )
+
+
+@router.delete("/job/{job_id}")
+async def cancel_job(
+    job_id: str,
+    user_data: dict = Depends(get_current_user_with_plan)
+):
+    """
+    Cancel a pending or queued analysis job.
+    
+    Can only cancel jobs that haven't started processing yet.
+    """
+    from src.pubsub.publisher import JobPublisher
+    
+    user_id = user_data["uid"]
+    
+    try:
+        publisher = JobPublisher()
+        cancelled = await publisher.cancel_job(job_id, user_id)
+        
+        if not cancelled:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Job cannot be cancelled (not found, already processing, or already completed)"
+            )
+        
+        return {
+            "job_id": job_id,
+            "status": "cancelled",
+            "message": "Job cancelled successfully"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to cancel job: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to cancel job: {str(e)}"
         )
 
 

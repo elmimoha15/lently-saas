@@ -33,7 +33,6 @@ const navItems = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
   { icon: Video, label: 'Videos', path: '/videos' },
   { icon: MessageSquare, label: 'Ask AI', path: '/ai' },
-  { icon: FileText, label: 'Templates', path: '/templates' },
   { icon: Settings, label: 'Settings', path: '/settings' },
   { icon: CreditCard, label: 'Billing', path: '/billing' },
 ];

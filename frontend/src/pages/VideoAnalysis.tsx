@@ -200,12 +200,25 @@ const VideoAnalysis = () => {
 
   const topics = insights?.key_themes?.slice(0, 8).map(t => t.theme) || [];
 
-  // Filter comments
-  const filteredComments = activeFilter === 'All'
-    ? storedComments
-    : storedComments.filter((c) => c.category?.toLowerCase() === activeFilter.toLowerCase());
-
+  // Filter comments by category
   const filterOptions = ['All', 'Questions', 'Praise', 'Complaints', 'Suggestions'];
+  
+  const filteredComments = (() => {
+    if (activeFilter === 'All') return storedComments;
+    
+    // Map filter names to backend category names
+    const categoryMap: Record<string, string[]> = {
+      'Questions': ['question'],
+      'Praise': ['appreciation', 'praise'],
+      'Complaints': ['complaint', 'criticism'],
+      'Suggestions': ['suggestion', 'feedback'],
+    };
+    
+    const acceptedCategories = categoryMap[activeFilter] || [];
+    return storedComments.filter((c) => 
+      acceptedCategories.includes(c.category?.toLowerCase() || '')
+    );
+  })();
 
   const daysSinceAnalysis = Math.ceil(
     (new Date().getTime() - new Date(analysisData.created_at).getTime()) / (1000 * 60 * 60 * 24)
@@ -275,7 +288,7 @@ const VideoAnalysis = () => {
               {(analysisData.comments_analyzed || 0).toLocaleString()} comments analyzed • {video.view_count.toLocaleString()} views • Analyzed {daysSinceAnalysis} day{daysSinceAnalysis !== 1 ? 's' : ''} ago
             </p>
 
-            <Link to={`/ai/${analysisData.analysis_id}`} className="mt-6 block">
+            <Link to={`/ai/${video.video_id}`} className="mt-6 block">
               <Button className="btn-primary flex items-center gap-2 w-full lg:w-auto">
                 <MessageSquare className="w-5 h-5" />
                 💬 Ask AI About This Video
@@ -352,24 +365,42 @@ const VideoAnalysis = () => {
                 Comments ({(analysisData.comments_analyzed || 0).toLocaleString()})
               </h2>
               <div className="flex gap-1 flex-wrap">
-                {filterOptions.map((option) => (
-                  <button
-                    key={option}
-                    onClick={() => setActiveFilter(option)}
-                    className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
-                      activeFilter === option
-                        ? 'bg-primary text-primary-foreground'
-                        : 'text-muted-foreground hover:bg-secondary'
-                    }`}
-                  >
-                    {option}
-                  </button>
-                ))}
+                {filterOptions.map((option) => {
+                  // Calculate count for each filter
+                  let count = storedComments.length;
+                  if (option !== 'All') {
+                    const categoryMap: Record<string, string[]> = {
+                      'Questions': ['question'],
+                      'Praise': ['appreciation', 'praise'],
+                      'Complaints': ['complaint', 'criticism'],
+                      'Suggestions': ['suggestion', 'feedback'],
+                    };
+                    const acceptedCategories = categoryMap[option] || [];
+                    count = storedComments.filter((c) => 
+                      acceptedCategories.includes(c.category?.toLowerCase() || '')
+                    ).length;
+                  }
+                  
+                  return (
+                    <button
+                      key={option}
+                      onClick={() => setActiveFilter(option)}
+                      className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                        activeFilter === option
+                          ? 'bg-primary text-primary-foreground'
+                          : 'text-muted-foreground hover:bg-secondary'
+                      }`}
+                    >
+                      {option} {option !== 'All' && count > 0 && `(${count})`}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
-            <div className="space-y-4">
-              {filteredComments.slice(0, 20).map((comment, index) => (
+            {filteredComments.length > 0 ? (
+              <div className="space-y-4">
+                {filteredComments.slice(0, 20).map((comment, index) => (
                 <motion.div
                   key={comment.comment_id}
                   initial={{ opacity: 0, y: 10 }}
@@ -411,6 +442,17 @@ const VideoAnalysis = () => {
                 </motion.div>
               ))}
             </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-12 rounded-xl border-2 border-dashed border-border bg-card">
+                <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4">
+                  <MessageSquare className="w-8 h-8 text-muted-foreground" />
+                </div>
+                <h3 className="text-lg font-semibold mb-2">No {activeFilter.toLowerCase()} found</h3>
+                <p className="text-muted-foreground">
+                  Try selecting a different category
+                </p>
+              </div>
+            )}
 
             {filteredComments.length > 20 && (
               <div className="mt-8 text-center">

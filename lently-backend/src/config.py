@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     # Rate Limiting
     rate_limit_enabled: bool = True
     
+    # Cloud Pub/Sub
+    pubsub_analysis_topic: str = "analysis-jobs"
+    pubsub_analysis_subscription: str = "analysis-jobs-worker"
+    pubsub_enabled: bool = False  # Set to True when Pub/Sub is configured
+    
     # Logging
     log_level: str = "INFO"
     
@@ -42,6 +47,21 @@ class Settings(BaseSettings):
     def origins_list(self) -> List[str]:
         """Parse comma-separated origins into list"""
         return [origin.strip() for origin in self.allowed_origins.split(",")]
+    
+    @property
+    def FIREBASE_PROJECT_ID(self) -> str:
+        """Alias for firebase_project_id (used by Pub/Sub)"""
+        return self.firebase_project_id
+    
+    @property
+    def PUBSUB_ANALYSIS_TOPIC(self) -> str:
+        """Alias for pubsub_analysis_topic"""
+        return self.pubsub_analysis_topic
+    
+    @property
+    def PUBSUB_ANALYSIS_SUBSCRIPTION(self) -> str:
+        """Alias for pubsub_analysis_subscription"""
+        return self.pubsub_analysis_subscription
     
     class Config:
         env_file = ".env"

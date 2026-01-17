@@ -204,12 +204,12 @@ print(test.json())
 
 ### 2.4 Subscription Plans
 
-| Plan | Videos/month | AI Questions | Comments/video |
-|------|--------------|--------------|----------------|
-| **Free** | 3 | 9 total | 300 |
-| **Starter** | 10 | 30/video | 3,000 |
-| **Pro** | 25 | 100/video | 10,000 |
-| **Business** | 100 | Unlimited | 50,000 |
+| Plan | Price | Videos/month | AI Questions | Comments/video |
+|------|-------|--------------|--------------|----------------|
+| **Free** | $0 | 1 | 2 total | 100 |
+| **Starter** | $19 | 10 | 30 total | 1,500 |
+| **Pro** | $39 | 20 | 75 total | 3,000 |
+| **Business** | $79 | 50 | Unlimited | 10,000 |
 
 ### ✅ Phase 2 Complete
 
@@ -706,7 +706,292 @@ curl -X POST http://localhost:8000/api/ask/question \
 - ✅ Create analysis worker
 - ✅ Add result handler
 
-*Detailed implementation steps...*
+### 9.1 Implementation Complete
+
+**Phase 9 has been fully implemented with asynchronous job processing using Cloud Pub/Sub.**
+
+**Files Created:**
+- `src/pubsub/__init__.py` - Module exports
+- `src/pubsub/schemas.py` - Job and result Pydantic models
+- `src/pubsub/publisher.py` - Job publisher service for Pub/Sub
+- `src/pubsub/worker.py` - Background worker that processes jobs
+
+**Files Updated:**
+- `src/config.py` - Added Pub/Sub configuration
+- `src/analysis/router.py` - Added async job endpoints
+
+### 9.2 Architecture
+
+The system now supports two modes of video analysis:
+
+#### Mode 1: In-Memory Background Processing (Default)
+```
+POST /api/analysis/start → Creates in-memory job → Background task processes
+                         ↓
+                    Returns analysis_id
+                         ↓
+GET /api/analysis/progress/{id} → SSE stream for real-time updates
+```
+
+#### Mode 2: Pub/Sub Queue (Production-Ready, Scalable)
+```
+POST /api/analysis/async → Publish to Pub/Sub → Returns job_id
+                         ↓                    ↓
+                    Job document         Worker pulls job
+                    in Firestore         from subscription
+                         ↓                    ↓
+                    Tracks status        Processes analysis
+                         ↓                    ↓
+GET /api/analysis/job/{id} ← Updates ← Stores result
+```
+
+### 9.3 API Endpoints
+
+#### New Async Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/analysis/async` | POST | Submit job to Pub/Sub queue |
+| `/api/analysis/job/{job_id}` | GET | Check job status and progress |
+| `/api/analysis/job/{job_id}` | DELETE | Cancel pending/queued job |
+
+#### Existing Endpoints (Still Supported)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/analysis/start` | POST | Start in-memory background analysis |
+| `/api/analysis/progress/{id}` | GET | SSE stream for progress updates |
+| `/api/analysis/history` | GET | Get user's analysis history |
+| `/api/analysis/{id}` | GET | Get specific analysis result |
+
+### 9.4 Job States
+
+Jobs flow through these states:
+
+1. **PENDING** - Job created, not yet published
+2. **QUEUED** - Published to Pub/Sub, waiting for worker
+3. **PROCESSING** - Worker is processing the job
+4. **COMPLETED** - Successfully finished
+5. **FAILED** - Error occurred during processing
+6. **CANCELLED** - User cancelled before processing
+
+### 9.5 Request/Response Examples
+
+**Submit Async Analysis:**
+```bash
+curl -X POST http://localhost:8000/api/analysis/async \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "video_url_or_id": "dQw4w9WgXcQ",
+    "max_comments": 100,
+    "include_sentiment": true,
+    "include_classification": true,
+    "include_insights": true,
+    "include_summary": true
+  }'
+```
+
+**Response:**
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "queued",
+  "message": "Analysis job queued. Use GET /job/{job_id} to check status."
+}
+```
+
+**Check Job Status:**
+```bash
+curl http://localhost:8000/api/analysis/job/550e8400-e29b-41d4-a716-446655440000 \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+**Response (Processing):**
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "user_id": "firebase_user_id",
+  "video_id": "dQw4w9WgXcQ",
+  "status": "processing",
+  "progress": 0.65,
+  "current_step": "Extracting insights",
+  "created_at": "2026-01-17T12:00:00Z",
+  "updated_at": "2026-01-17T12:02:30Z"
+}
+```
+
+**Response (Completed):**
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "user_id": "firebase_user_id",
+  "video_id": "dQw4w9WgXcQ",
+  "status": "completed",
+  "progress": 1.0,
+  "current_step": "Completed",
+  "analysis_id": "abc123def456",
+  "created_at": "2026-01-17T12:00:00Z",
+  "updated_at": "2026-01-17T12:03:45Z"
+}
+```
+
+### 9.6 Running the Worker
+
+**In Development (Local):**
+```bash
+cd /home/elmi/Documents/Projects/Lently/lently-backend
+source venv/bin/activate
+
+# Run as standalone worker
+python -m src.pubsub.worker
+```
+
+**In Production (Cloud Run/Compute Engine):**
+```bash
+# Deploy worker as separate Cloud Run service
+gcloud run deploy lently-analysis-worker \
+  --source . \
+  --region us-central1 \
+  --platform managed \
+  --command "python -m src.pubsub.worker" \
+  --set-env-vars FIREBASE_PROJECT_ID=your-project-id \
+  --max-instances 10 \
+  --min-instances 1
+```
+
+### 9.7 Setting Up Cloud Pub/Sub
+
+**1. Enable Pub/Sub API:**
+```bash
+gcloud services enable pubsub.googleapis.com
+```
+
+**2. Create Topic:**
+```bash
+gcloud pubsub topics create analysis-jobs
+```
+
+**3. Create Subscription with retry policy:**
+```bash
+gcloud pubsub subscriptions create analysis-jobs-worker \
+  --topic analysis-jobs \
+  --ack-deadline 600 \
+  --message-retention-duration 7d \
+  --min-retry-delay 10s \
+  --max-retry-delay 600s
+```
+
+**4. Update .env:**
+```bash
+# Add to .env
+PUBSUB_ANALYSIS_TOPIC=analysis-jobs
+PUBSUB_ANALYSIS_SUBSCRIPTION=analysis-jobs-worker
+PUBSUB_ENABLED=true
+```
+
+### 9.8 Key Features
+
+#### 1. Graceful Degradation
+- If Pub/Sub is not configured, falls back to in-memory processing
+- No breaking changes to existing workflows
+- Frontend can detect and use appropriate endpoint
+
+#### 2. Progress Tracking
+- Jobs tracked in Firestore `analysis_jobs` collection
+- Real-time progress updates (0.0 - 1.0)
+- Detailed step descriptions
+
+#### 3. Retry Logic
+- Failed jobs automatically retried by Pub/Sub
+- Configurable retry delays and max attempts
+- Dead-letter queue for permanently failed jobs
+
+#### 4. Cancellation Support
+- Users can cancel pending/queued jobs
+- Cannot cancel jobs already processing
+
+#### 5. Priority Support
+- Jobs can have priority 1-10 (1=highest)
+- Premium users could get higher priority
+
+### 9.9 Monitoring & Metrics
+
+**View Pub/Sub Metrics:**
+```bash
+# View topic metrics
+gcloud pubsub topics describe analysis-jobs
+
+# View subscription metrics
+gcloud pubsub subscriptions describe analysis-jobs-worker
+```
+
+**Check Job Status in Firestore:**
+```javascript
+// In Firebase Console or app
+db.collection('analysis_jobs')
+  .where('status', '==', 'processing')
+  .get()
+```
+
+### 9.10 Testing
+
+**Test Job Submission:**
+```bash
+# Start backend
+cd lently-backend
+source venv/bin/activate
+uvicorn src.main:app --reload --port 8000
+
+# In another terminal, start worker
+python -m src.pubsub.worker
+
+# Submit test job
+curl -X POST http://localhost:8000/api/analysis/async \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "video_url_or_id": "dQw4w9WgXcQ",
+    "max_comments": 50
+  }'
+
+# Check status (use job_id from response)
+curl http://localhost:8000/api/analysis/job/JOB_ID \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+**Expected Flow:**
+1. Job status starts as `queued`
+2. Worker picks up job, status becomes `processing`
+3. Progress updates from 0.0 → 1.0
+4. Status becomes `completed` with `analysis_id`
+5. Retrieve full analysis using `GET /api/analysis/{analysis_id}`
+
+### 9.11 Advantages Over Synchronous Processing
+
+| Aspect | Synchronous | Pub/Sub Async |
+|--------|-------------|---------------|
+| **Response Time** | Waits 30-120s | Returns immediately |
+| **Scalability** | Limited by server threads | Unlimited workers |
+| **Reliability** | Lost if connection drops | Persisted in queue |
+| **Retry** | Manual only | Automatic retries |
+| **Priority** | FIFO only | Priority-based |
+| **Monitoring** | Limited | Full metrics in Cloud Console |
+
+### ✅ Phase 9 Complete
+
+- [x] Pub/Sub publisher service
+- [x] Background worker with job processing
+- [x] Job status tracking in Firestore
+- [x] Async API endpoints
+- [x] Progress reporting (0-100%)
+- [x] Job cancellation
+- [x] Retry logic and error handling
+- [x] Graceful degradation when Pub/Sub unavailable
+- [x] Priority support for premium users
+- [x] Comprehensive monitoring and logging
+
+**Next:** Phase 10 - Usage Tracking & Quotas
 
 ---
 
@@ -717,7 +1002,501 @@ curl -X POST http://localhost:8000/api/ask/question \
 - ✅ Create quota checking middleware
 - ✅ Add monthly reset scheduler
 
-*Detailed implementation steps...*
+### 10.1 Implementation Complete
+
+**Phase 10 enhances the existing billing system with comprehensive usage tracking, analytics, and automated resets.**
+
+**Files Enhanced/Created:**
+- `src/billing/service.py` - Already has atomic usage counters and quota enforcement
+- `src/billing/enforcement.py` - Already has FastAPI dependencies for quota checking
+- `src/billing/analytics.py` - **NEW** - Usage analytics and trends
+- `src/billing/reset_scheduler.py` - **NEW** - Monthly reset automation
+- `src/billing/router.py` - **UPDATED** - Added analytics and admin endpoints
+- `scripts/setup_usage_scheduler.sh` - **NEW** - Cloud Scheduler setup script
+
+### 10.2 Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Usage Tracking Flow                       │
+└─────────────────────────────────────────────────────────────┘
+
+User Action (Video Analysis/AI Question)
+           ↓
+    Check Quota (require_video_quota/require_ai_quota)
+           ↓
+    [ALLOWED?] ──No→ Return 402 Payment Required
+           ↓
+         Yes
+           ↓
+    Perform Action
+           ↓
+    Increment Counter (atomic Firestore update)
+           ↓
+    Return Success
+
+
+┌─────────────────────────────────────────────────────────────┐
+│                    Monthly Reset Flow                        │
+└─────────────────────────────────────────────────────────────┘
+
+Cloud Scheduler (1st of month, midnight)
+           ↓
+    POST /api/billing/admin/reset-usage
+           ↓
+    UsageResetScheduler.reset_all_users()
+           ↓
+    For each user:
+      - Check if period ended
+      - Reset counters to 0
+      - Update limits based on current plan
+      - Set new period_start and period_end
+           ↓
+    Return stats (reset_successful, reset_failed, not_due)
+```
+
+### 10.3 Core Components
+
+#### 1. Usage Counters (Firestore)
+
+**Document Structure:**
+```javascript
+// users/{userId}/billing/usage
+{
+  videos_analyzed: 5,
+  comments_analyzed: 437,
+  ai_questions_used: 12,
+  videos_limit: 10,
+  comments_limit: 3000,
+  ai_questions_limit: 30,
+  period_start: "2026-01-01T00:00:00Z",
+  period_end: "2026-02-01T00:00:00Z"
+}
+```
+
+**Atomic Updates:**
+```python
+# Increment using Firestore's Increment
+from google.cloud.firestore import Increment
+usage_ref.update({
+  "videos_analyzed": Increment(1)
+})
+```
+
+#### 2. Quota Enforcement (Middleware)
+
+**FastAPI Dependencies:**
+```python
+from src.billing.enforcement import require_video_quota
+
+@router.post("/api/analysis/start")
+async def start_analysis(
+    quota: QuotaCheckResult = Depends(require_video_quota),
+    user: AuthenticatedUser = Depends(get_current_user)
+):
+    # If we reach here, user has quota
+    # quota.remaining tells us how many left
+    ...
+```
+
+**Available Enforcers:**
+- `require_video_quota()` - For video analysis
+- `require_ai_quota()` - For AI questions
+- `require_comments_quota()` - For comment limits
+
+#### 3. Usage Analytics
+
+**Get Comprehensive Analytics:**
+```python
+from src.billing.analytics import usage_analytics_service
+
+analytics = await usage_analytics_service.get_usage_analytics(
+    user_id="user123",
+    include_trends=True,
+    days_back=30
+)
+
+# Returns:
+# - current_period: Current usage vs limits
+# - usage_percentage: % of quota used
+# - projected_usage: Estimated end-of-period usage
+# - warnings: List of quota warnings
+# - recommendations: Actionable suggestions
+# - trends: Historical daily snapshots (optional)
+```
+
+### 10.4 API Endpoints
+
+#### User Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/billing/info` | GET | Complete billing info (usage + subscription) |
+| `/api/billing/usage` | GET | Current usage only |
+| `/api/billing/analytics` | GET | Usage trends and projections |
+| `/api/billing/quota/{type}` | GET | Check specific quota |
+
+#### Admin Endpoints (Cron/Scheduler)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/billing/admin/reset-usage` | POST | Reset usage for one/all users |
+| `/api/billing/admin/users-due-reset` | GET | List users needing reset |
+
+### 10.5 Monthly Reset System
+
+**How It Works:**
+
+1. **Cloud Scheduler** triggers monthly (1st of each month)
+2. **UsageResetScheduler** processes all users
+3. For each user:
+   - Check if `period_end` has passed
+   - If yes: Reset counters, update limits, set new period
+   - If no: Skip
+4. Return statistics
+
+**Manual Reset (Single User):**
+```bash
+curl -X POST http://localhost:8000/api/billing/admin/reset-usage \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "user123",
+    "force": false,
+    "admin_key": "your_admin_key"
+  }'
+```
+
+**Bulk Reset (All Users):**
+```bash
+curl -X POST http://localhost:8000/api/billing/admin/reset-usage \
+  -H "Content-Type: application/json" \
+  -d '{
+    "admin_key": "your_admin_key"
+  }'
+```
+
+### 10.6 Setup Cloud Scheduler
+
+**Automated Setup:**
+```bash
+cd lently-backend/scripts
+chmod +x setup_usage_scheduler.sh
+
+# Set environment variables
+export FIREBASE_PROJECT_ID=your-project-id
+export GCP_REGION=us-central1
+export BACKEND_URL=https://your-backend-url.run.app
+export JWT_SECRET_KEY=your-jwt-secret
+
+# Run setup
+./setup_usage_scheduler.sh
+```
+
+**Manual Setup:**
+```bash
+# 1. Enable API
+gcloud services enable cloudscheduler.googleapis.com
+
+# 2. Create monthly reset job
+gcloud scheduler jobs create http monthly-usage-reset \
+  --location=us-central1 \
+  --schedule="0 0 1 * *" \
+  --time-zone="America/New_York" \
+  --uri="https://your-backend.run.app/api/billing/admin/reset-usage" \
+  --http-method=POST \
+  --headers="Content-Type=application/json" \
+  --message-body='{"admin_key": "your_admin_key"}' \
+  --attempt-deadline=600s
+
+# 3. Test manually
+gcloud scheduler jobs run monthly-usage-reset --location=us-central1
+```
+
+### 10.7 Usage Analytics Examples
+
+**Request:**
+```bash
+curl http://localhost:8000/api/billing/analytics?include_trends=true&days_back=30 \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+**Response:**
+```json
+{
+  "current_period": {
+    "videos_used": 7,
+    "videos_limit": 10,
+    "ai_questions_used": 18,
+    "ai_questions_limit": 30,
+    "comments_analyzed": 524,
+    "comments_limit": 3000
+  },
+  "usage_percentage": {
+    "videos": 70.0,
+    "ai_questions": 60.0
+  },
+  "projected_usage": {
+    "videos": 12,
+    "ai_questions": 28
+  },
+  "warnings": [
+    "You've used 70% of your video quota",
+    "At current pace, you'll exceed your video limit before period ends"
+  ],
+  "recommendations": [
+    "Consider upgrading to Pro plan to avoid running out of videos"
+  ],
+  "trends": {
+    "avg_videos_per_day": 0.5,
+    "avg_ai_questions_per_day": 1.2,
+    "total_videos": 7,
+    "total_ai_questions": 18,
+    "total_comments": 524,
+    "peak_usage_day": "2026-01-15T00:00:00Z"
+  }
+}
+```
+
+### 10.8 Quota Check Flow
+
+**Example: Video Analysis**
+
+```python
+# In analysis/router.py
+from src.billing.enforcement import require_video_quota
+
+@router.post("/start")
+async def start_analysis(
+    request: AnalysisRequest,
+    quota: QuotaCheckResult = Depends(require_video_quota),
+    user: AuthenticatedUser = Depends(get_current_user)
+):
+    # Quota is checked BEFORE entering this function
+    # If exceeded, user gets 402 Payment Required
+    
+    # Perform analysis
+    result = await analysis_service.run_analysis(...)
+    
+    # Increment usage AFTER success
+    await billing_service.increment_usage(
+        user.uid,
+        UsageType.VIDEOS,
+        amount=1
+    )
+    
+    return result
+```
+
+**Error Response (Quota Exceeded):**
+```json
+{
+  "detail": {
+    "error": "quota_exceeded",
+    "usage_type": "videos",
+    "current": 10,
+    "limit": 10,
+    "remaining": 0,
+    "message": "You've reached your videos limit (10). Upgrade your plan to continue.",
+    "upgrade_required": true
+  }
+}
+```
+
+### 10.9 Firestore Collections
+
+#### `users/{userId}/billing/usage`
+Current usage and limits:
+```javascript
+{
+  videos_analyzed: 5,
+  comments_analyzed: 437,
+  ai_questions_used: 12,
+  videos_limit: 10,
+  comments_limit: 3000,
+  ai_questions_limit: 30,
+  period_start: Timestamp,
+  period_end: Timestamp
+}
+```
+
+#### `users/{userId}/billing/subscription`
+Subscription details:
+```javascript
+{
+  plan_id: "pro",
+  status: "active",
+  paddle_subscription_id: "sub_123",
+  current_period_start: Timestamp,
+  current_period_end: Timestamp,
+  cancel_at_period_end: false,
+  billing_cycle: "monthly"
+}
+```
+
+#### `users/{userId}/usage_history/{date}` (Optional)
+Daily snapshots for analytics:
+```javascript
+{
+  date: "2026-01-17",
+  videos_used: 2,
+  ai_questions_used: 5,
+  comments_analyzed: 150
+}
+```
+
+### 10.10 Testing
+
+**Test Quota Enforcement:**
+```bash
+# Create test user with free plan (3 videos)
+# Analyze 3 videos successfully
+# 4th video should return 402
+
+curl -X POST http://localhost:8000/api/analysis/start \
+  -H "Authorization: Bearer TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"video_url_or_id": "test123"}'
+
+# Expected after 3rd video:
+# Status: 402 Payment Required
+# Body: {"error": "quota_exceeded", "limit": 3, "current": 3}
+```
+
+**Test Monthly Reset:**
+```bash
+# Test reset for single user
+curl -X POST http://localhost:8000/api/billing/admin/reset-usage \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "test_user",
+    "force": true,
+    "admin_key": "test_key"
+  }'
+
+# Verify usage was reset
+curl http://localhost:8000/api/billing/usage \
+  -H "Authorization: Bearer TOKEN"
+
+# Should show videos_analyzed: 0
+```
+
+**Test Analytics:**
+```bash
+curl http://localhost:8000/api/billing/analytics \
+  -H "Authorization: Bearer TOKEN"
+
+# Should return usage trends and projections
+```
+
+### 10.11 Key Features
+
+#### ✅ **Atomic Usage Tracking**
+- Firestore's `Increment` ensures no race conditions
+- Multiple requests can increment simultaneously
+- Guaranteed accuracy
+
+#### ✅ **Pre-Request Enforcement**
+- Quota checked BEFORE expensive operations
+- Prevents wasted resources
+- Clear error messages with upgrade CTAs
+
+#### ✅ **Automated Monthly Resets**
+- Cloud Scheduler triggers resets
+- Handles all users automatically
+- Retry logic for failures
+- Monitoring and alerts
+
+#### ✅ **Usage Analytics**
+- Historical trends
+- Usage projections
+- Smart recommendations
+- Warning system
+
+#### ✅ **Plan-Based Limits**
+- Limits automatically updated on plan change
+- Immediate effect
+- No manual intervention needed
+
+#### ✅ **Graceful Degradation**
+- If Cloud Scheduler fails, manual reset available
+- Admin endpoints for emergency fixes
+- Query to find users needing reset
+
+### 10.12 Monitoring & Alerts
+
+**View Scheduler Status:**
+```bash
+gcloud scheduler jobs describe monthly-usage-reset --location=us-central1
+```
+
+**Check Recent Runs:**
+```bash
+gcloud scheduler jobs executions list monthly-usage-reset --location=us-central1
+```
+
+**View Logs:**
+```bash
+gcloud logging read "resource.type=cloud_scheduler_job 
+  AND resource.labels.job_id=monthly-usage-reset" 
+  --limit 50
+```
+
+**Set Up Alerts:**
+```bash
+# Alert if reset job fails
+gcloud monitoring alert-policies create \
+  --notification-channels=YOUR_CHANNEL \
+  --display-name="Usage Reset Failed" \
+  --condition="..." \
+  --combiner=OR
+```
+
+### 10.13 Best Practices
+
+1. **Always Use Enforcement Dependencies**
+   ```python
+   # ❌ Don't check quota manually
+   usage = await billing_service.get_user_usage(user_id)
+   if usage.videos_analyzed >= usage.videos_limit:
+       raise HTTPException(...)
+   
+   # ✅ Use dependency injection
+   quota: QuotaCheckResult = Depends(require_video_quota)
+   ```
+
+2. **Increment After Success**
+   ```python
+   # ✅ Increment only after operation completes
+   result = await expensive_operation()
+   await billing_service.increment_usage(user_id, UsageType.VIDEOS)
+   return result
+   ```
+
+3. **Use BillingService Everywhere**
+   ```python
+   # ✅ Single source of truth
+   from src.billing import billing_service
+   info = await billing_service.get_billing_info(user_id, email)
+   ```
+
+4. **Monitor Reset Jobs**
+   - Set up alerts for failed resets
+   - Check logs monthly
+   - Have manual backup process
+
+### ✅ Phase 10 Complete
+
+- [x] Atomic usage counters in Firestore
+- [x] Quota enforcement with FastAPI dependencies
+- [x] Monthly reset scheduler with Cloud Scheduler
+- [x] Usage analytics with trends and projections
+- [x] Admin endpoints for manual resets
+- [x] Daily usage snapshots (optional)
+- [x] Smart recommendations system
+- [x] Projected usage calculations
+- [x] Comprehensive monitoring and logging
+
+**Next:** Phase 11 - Redis Caching Layer
 
 ---
 

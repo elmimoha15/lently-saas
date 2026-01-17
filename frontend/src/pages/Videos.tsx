@@ -45,7 +45,7 @@ const Videos = () => {
   const [activeFilter, setActiveFilter] = useState('All');
   const { state: analysisState } = useAnalysis();
 
-  // Fetch video history from API
+  // Fetch video history from API with periodic refetch for processing videos
   const { data: historyData, isLoading, refetch } = useQuery({
     queryKey: ['analysisHistory'],
     queryFn: async () => {
@@ -58,16 +58,23 @@ const Videos = () => {
     staleTime: 0, // Always consider data stale
     refetchOnMount: true, // Refetch when component mounts
     refetchOnWindowFocus: true, // Refetch when window regains focus
+    refetchInterval: (data) => {
+      // If there are processing videos, poll every 2 seconds
+      const hasProcessing = data?.analyses?.some((a: any) => a.status === 'processing');
+      return hasProcessing ? 2000 : false;
+    },
   });
 
   // Convert history to Video format
   const apiVideos: Video[] = useMemo(() => {
     if (!historyData?.analyses) return [];
 
-    return historyData.analyses
-      .filter((item) => item.status === 'completed')
-      .map((item: AnalysisHistoryItem): Video => ({
-        id: item.analysis_id,
+    return historyData.analyses.map((item: AnalysisHistoryItem): Video => {
+      // Check if this is a processing video
+      const isProcessing = item.status === 'processing';
+      
+      return {
+        id: item.video_id || item.analysis_id,
         title: item.video_title,
         channel: item.channel_title || 'Unknown Channel',
         channelVerified: false,
@@ -89,14 +96,19 @@ const Videos = () => {
           general: item.comments_analyzed || 0,
         },
         topics: [],
-      }));
+        isProcessing: isProcessing,
+        progress: isProcessing ? item.progress || 0 : undefined,
+      };
+    });
   }, [historyData]);
 
-  // Add active analyses to the list
+  // Add active analyses to the list (only if not already in API results)
   const processingVideos: Video[] = useMemo(() => {
     const processing: Video[] = [];
+    const apiAnalysisIds = new Set(apiVideos.map(v => v.id));
+    
     analysisState.activeAnalyses.forEach((analysis) => {
-      if (analysis.step !== 'completed' && analysis.step !== 'failed') {
+      if (analysis.step !== 'completed' && analysis.step !== 'failed' && !apiAnalysisIds.has(analysis.analysisId)) {
         processing.push({
           id: analysis.analysisId,
           title: analysis.videoTitle || 'Processing...',
@@ -115,7 +127,7 @@ const Videos = () => {
       }
     });
     return processing;
-  }, [analysisState.activeAnalyses]);
+  }, [analysisState.activeAnalyses, apiVideos]);
 
   // Combine processing and completed videos
   const allVideos = useMemo(() => {
@@ -214,7 +226,9 @@ const Videos = () => {
         </div>
 
         {/* Video Table */}
-        {filteredVideos.length > 0 ? (
+        {isLoading ? (
+          <VideoTableSkeleton />
+        ) : filteredVideos.length > 0 ? (
           <VideoTable videos={filteredVideos} />
         ) : (
           <EmptyState />
@@ -274,6 +288,25 @@ const EmptyState = () => (
       </Button>
     </Link>
   </motion.div>
+);
+
+const VideoTableSkeleton = () => (
+  <div className="space-y-4">
+    {[...Array(5)].map((_, i) => (
+      <div key={i} className="flex items-center gap-4 p-4 bg-card border border-border rounded-xl animate-pulse">
+        <div className="w-40 h-24 bg-muted rounded-lg"></div>
+        <div className="flex-1 space-y-3">
+          <div className="h-5 bg-muted rounded w-3/4"></div>
+          <div className="h-4 bg-muted rounded w-1/2"></div>
+          <div className="flex gap-2">
+            <div className="h-6 w-16 bg-muted rounded-full"></div>
+            <div className="h-6 w-16 bg-muted rounded-full"></div>
+            <div className="h-6 w-16 bg-muted rounded-full"></div>
+          </div>
+        </div>
+      </div>
+    ))}
+  </div>
 );
 
 export default Videos;

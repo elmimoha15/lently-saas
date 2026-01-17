@@ -115,3 +115,8 @@ async def increment_ai_question_usage(user_id: str) -> None:
 async def increment_comments_usage(user_id: str, amount: int) -> None:
     """Call after successfully processing comments"""
     await billing_service.increment_usage(user_id, UsageType.COMMENTS, amount)
+
+
+# Aliases for convenience
+require_ai_quota = require_ai_question_quota  # Alias for backwards compatibility
+require_comments_quota = require_comment_quota  # Alias for backwards compatibility

@@ -16,6 +16,7 @@ interface ChatViewProps {
   currentConversationId: string | null;
   onLoadConversation: (conversationId: string, videoId: string) => void;
   onNewConversation: () => void;
+  isLoadingConversations?: boolean;
   
   // Video selector props
   selectedVideo: VideoOption | undefined;
@@ -58,6 +59,7 @@ export const ChatView = ({
   currentConversationId,
   onLoadConversation,
   onNewConversation,
+  isLoadingConversations = false,
   selectedVideo,
   selectedVideoId,
   videoOptions,
@@ -89,6 +91,7 @@ export const ChatView = ({
         currentConversationId={currentConversationId}
         onLoadConversation={onLoadConversation}
         onNewConversation={onNewConversation}
+        isLoading={isLoadingConversations}
       />
 
       {/* Main Chat Area */}

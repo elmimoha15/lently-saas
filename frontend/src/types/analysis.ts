@@ -173,6 +173,9 @@ export interface AnalysisHistoryItem {
   video_thumbnail?: string;
   channel_title?: string;
   status: AnalysisStatus;
+  progress?: number;
+  step?: AnalysisStep;
+  step_label?: string;
   created_at: string;
   completed_at?: string;
   comments_analyzed?: number;
@@ -180,6 +183,12 @@ export interface AnalysisHistoryItem {
     positive: number;
     negative: number;
     neutral: number;
+  };
+  classification_summary?: {
+    questions?: number;
+    praise?: number;
+    complaints?: number;
+    suggestions?: number;
   };
 }
 

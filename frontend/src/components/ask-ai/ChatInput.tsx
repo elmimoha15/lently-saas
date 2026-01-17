@@ -30,7 +30,9 @@ export const ChatInput = ({
   quotaData,
   variant = 'chat',
 }: ChatInputProps) => {
-  const isQuotaExhausted = quotaData && quotaData.questions_used >= quotaData.questions_limit;
+  // Check if unlimited (Business plan with very high limit)
+  const isUnlimited = quotaData && quotaData.questions_limit >= 999999;
+  const isQuotaExhausted = quotaData && !isUnlimited && quotaData.questions_used >= quotaData.questions_limit;
   const canSend = value.trim() && !disabled && !isLoading && !isQuotaExhausted;
 
   return (
@@ -95,7 +97,10 @@ export const ChatInput = ({
       {/* Quota Display */}
       {quotaData && !isQuotaExhausted && (
         <p className="text-xs text-muted-foreground mt-2 text-center">
-          {quotaData.questions_used}/{quotaData.questions_limit} questions used this month — {quotaData.plan} Plan
+          {isUnlimited 
+            ? `${quotaData.questions_used} questions used this month — ${quotaData.plan} Plan (Unlimited)`
+            : `${quotaData.questions_used}/${quotaData.questions_limit} questions used this month — ${quotaData.plan} Plan`
+          }
         </p>
       )}
     </div>

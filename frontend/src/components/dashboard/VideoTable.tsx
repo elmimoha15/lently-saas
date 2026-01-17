@@ -130,7 +130,7 @@ export const VideoTable = ({ videos, compact = false }: VideoTableProps) => {
                 {/* Video Info */}
                 <td className="py-4 px-6">
                   <Link 
-                    to={`/videos/${video.id}`}
+                    to={video.isProcessing ? `/analyze/${video.id}` : `/videos/${video.id}`}
                     className="flex items-center gap-4 group/link"
                   >
                     <div className="relative w-20 h-12 rounded-lg overflow-hidden flex-shrink-0 ring-2 ring-transparent group-hover/link:ring-primary/20 transition-all">
@@ -154,7 +154,7 @@ export const VideoTable = ({ videos, compact = false }: VideoTableProps) => {
                         {video.isProcessing && (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs font-medium">
                             <Loader2 className="w-3 h-3 animate-spin" />
-                            {video.progress}%
+                            Analyzing {video.progress}%
                           </span>
                         )}
                       </div>

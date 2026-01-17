@@ -10,6 +10,8 @@ from src.gemini.router import router as gemini_router
 from src.analysis.router import router as analysis_router
 from src.ask_ai.router import router as ask_ai_router
 from src.billing.router import router as billing_router
+from src.cache.router import router as cache_router
+from src.cache import get_redis_client
 import logging
 
 settings = get_settings()
@@ -34,7 +36,26 @@ async def lifespan(app: FastAPI):
         logger.warning(f"⚠️  Firebase initialization failed: {e}")
         logger.warning("   Continuing without Firebase (some features will not work)")
     
+    # Initialize Redis
+    try:
+        redis_client = await get_redis_client()
+        if redis_client.enabled:
+            logger.info("✅ Redis cache initialized successfully")
+        else:
+            logger.warning("⚠️  Redis not available - caching disabled")
+    except Exception as e:
+        logger.warning(f"⚠️  Redis initialization failed: {e}")
+        logger.warning("   Continuing without Redis (caching disabled)")
+    
     yield
+    
+    # Cleanup
+    try:
+        redis_client = await get_redis_client()
+        await redis_client.disconnect()
+        logger.info("Redis connection closed")
+    except:
+        pass
     
     logger.info("👋 Shutting down Lently Backend")
 
@@ -61,6 +82,7 @@ app.include_router(gemini_router)
 app.include_router(analysis_router)
 app.include_router(ask_ai_router)
 app.include_router(billing_router)
+app.include_router(cache_router)
 
 @app.get("/")
 async def root():
@@ -74,6 +96,14 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Detailed health check with feature status"""
+    # Check Redis connectivity
+    redis_healthy = False
+    try:
+        redis_client = await get_redis_client()
+        redis_healthy = redis_client.enabled
+    except:
+        pass
+    
     return {
         "status": "healthy",
         "environment": settings.environment,
@@ -81,7 +111,8 @@ async def health_check():
             "youtube_api": bool(settings.youtube_api_key != "your-youtube-api-key"),
             "gemini_ai": bool(settings.gemini_api_key != "your-gemini-api-key"),
             "firebase": True,  # If we get here, Firebase initialized
-            "redis": bool(settings.redis_host),
+            "redis_cache": redis_healthy,
+            "pubsub": settings.pubsub_enabled,
             "paddle": bool(settings.paddle_webhook_secret != "your-paddle-webhook-secret")
         }
     }

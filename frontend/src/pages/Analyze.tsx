@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { Check, AlertCircle } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Button } from '@/components/ui/button';
@@ -50,10 +50,24 @@ const Analyze = () => {
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { videoId } = useParams<{ videoId?: string }>();
   
-  const { startAnalysis, getAnalysis } = useAnalysis();
-  
-  // Get the current analysis from context
+  const { startAnalysis, getAnalysis, state } = useAnalysis();
+    // If videoId is in URL params, try to find existing analysis for that video
+  useEffect(() => {
+    if (videoId && !analysisId) {
+      // Find an active analysis for this video_id
+      const existingAnalysis = state.activeAnalyses.find(
+        a => a.videoId === videoId && a.step !== 'completed' && a.step !== 'failed'
+      );
+      
+      if (existingAnalysis) {
+        setAnalysisId(existingAnalysis.analysisId);
+        setIsAnalyzing(true);
+      }
+    }
+  }, [videoId, analysisId, state.activeAnalyses]);
+    // Get the current analysis from context
   const activeAnalysis = analysisId ? getAnalysis(analysisId) : undefined;
   
   // Build display steps from active analysis
