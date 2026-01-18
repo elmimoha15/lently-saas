@@ -31,9 +31,6 @@ export const UsageCard = ({ title, current, limit, resetDate, showWarning, isPer
       whileHover={{ y: -2 }}
       className="card-premium relative overflow-hidden"
     >
-      {/* Icon background accent */}
-      <div className="absolute -top-4 -right-4 w-24 h-24 bg-primary/5 rounded-full" />
-      
       <div className="relative">
         <div className="flex items-center gap-3 mb-3">
           <div className="p-2 rounded-lg bg-primary/10">

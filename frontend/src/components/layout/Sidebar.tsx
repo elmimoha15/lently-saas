@@ -40,7 +40,7 @@ const navItems = [
 export const Sidebar = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { user, signOut } = useAuth();
   const { planName, subscription } = useBilling();
   
   // Get user display info
@@ -122,16 +122,26 @@ export const Sidebar = () => {
             </span>
           </div>
         </div>
-        <button 
-          onClick={async () => {
-            await logout();
-            navigate('/login');
-          }}
-          className="w-full mt-3 flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-destructive transition-colors rounded-lg hover:bg-destructive/5"
-        >
-          <LogOut className="w-4 h-4" />
-          <span>Log out</span>
-        </button>
+        {user ? (
+          <button 
+            onClick={async () => {
+              await signOut();
+              navigate('/login');
+            }}
+            className="w-full mt-3 flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-destructive transition-colors rounded-lg hover:bg-destructive/5"
+          >
+            <LogOut className="w-4 h-4" />
+            <span>Log out</span>
+          </button>
+        ) : (
+          <Link
+            to="/login"
+            className="w-full mt-3 inline-flex items-center justify-center gap-2 px-3 py-2 text-sm text-foreground bg-primary/5 rounded-lg hover:bg-primary/10 transition-colors font-medium"
+          >
+            <LogOut className="w-4 h-4 rotate-180" />
+            <span>Sign in</span>
+          </Link>
+        )}
       </div>
     </aside>
   );

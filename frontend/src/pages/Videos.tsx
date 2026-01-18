@@ -74,7 +74,7 @@ const Videos = () => {
       const isProcessing = item.status === 'processing';
       
       return {
-        id: item.video_id || item.analysis_id,
+        id: item.analysis_id,
         title: item.video_title,
         channel: item.channel_title || 'Unknown Channel',
         channelVerified: false,

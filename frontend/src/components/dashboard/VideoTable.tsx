@@ -181,7 +181,7 @@ export const VideoTable = ({ videos, compact = false }: VideoTableProps) => {
                   {video.isProcessing ? (
                     <span className="text-sm text-muted-foreground">...</span>
                   ) : (
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/5 text-sm font-medium text-foreground">
+                    <span className="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
                       💬 {video.commentCount.toLocaleString()}
                     </span>
                   )}

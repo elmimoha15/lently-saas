@@ -592,25 +592,59 @@ async def get_analysis(
     
     try:
         db = get_firestore()
-        doc = db.collection("analyses").document(analysis_id).get()
-        
+
+        # First try the full analysis document in the global 'analyses' collection
+        global_doc = db.collection("analyses").document(analysis_id).get()
+        if global_doc.exists:
+            analysis_data = global_doc.to_dict()
+            # Verify ownership
+            if analysis_data.get("user_id") != user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied"
+                )
+            return AnalysisResponse(**analysis_data)
+
+        # Fallback to the user's summary document under users/{user_id}/analyses/{analysis_id}
+        doc = db.collection("users") \
+            .document(user_id) \
+            .collection("analyses") \
+            .document(analysis_id).get()
+
         if not doc.exists:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Analysis not found"
             )
-        
-        analysis_data = doc.to_dict()
-        
-        # Verify ownership
-        if analysis_data.get("user_id") != user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied"
-            )
-        
-        return AnalysisResponse(**analysis_data)
-        
+
+        summary = doc.to_dict()
+
+        # Build a minimal AnalysisResponse from the summary doc so pydantic validation passes
+        created_at = summary.get("created_at")
+        if isinstance(created_at, str):
+            try:
+                created_at = datetime.fromisoformat(created_at)
+            except Exception:
+                created_at = datetime.utcnow()
+
+        minimal = {
+            "analysis_id": analysis_id,
+            "video": {
+                "video_id": summary.get("video_id") or "",
+                "title": summary.get("video_title") or "",
+                "channel_title": summary.get("channel_title") or "",
+                "view_count": summary.get("view_count") or 0,
+                "comment_count": summary.get("comments_analyzed") or 0,
+                "thumbnail_url": summary.get("video_thumbnail") or "",
+            },
+            "status": summary.get("status") or "completed",
+            "created_at": created_at,
+            "completed_at": summary.get("completed_at"),
+            "comments_analyzed": summary.get("comments_analyzed") or 0,
+        }
+
+        return AnalysisResponse(**minimal)
+
     except HTTPException:
         raise
     except Exception as e:
