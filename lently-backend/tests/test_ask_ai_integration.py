@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, Mock, patch
 from datetime import datetime
 
 from src.ask_ai.service import AskAIService
-from src.ask_ai.schemas import AskAIRequest, ContextFilter
+from src.ask_ai.schemas import AskQuestionRequest, ContextFilter
 
 
 # ============================================================================
@@ -54,7 +54,7 @@ class TestAskAIService:
         
         service = AskAIService(gemini=mock_gemini_client)
         
-        request = AskAIRequest(
+        request = AskQuestionRequest(
             question="What are viewers asking about?",
             video_id="test_video_123",
             context_filter=ContextFilter.QUESTIONS
@@ -63,7 +63,7 @@ class TestAskAIService:
         response = await service.ask_question(
             request=request,
             user_id="test_user",
-            email="test@example.com"
+            user_plan="free"
         )
         
         # Verify response
@@ -112,7 +112,7 @@ class TestAskAIService:
         service = AskAIService(gemini=mock_gemini_client)
         
         # Ask follow-up
-        request = AskAIRequest(
+        request = AskQuestionRequest(
             question="Which advanced topic specifically?",
             video_id="video_123",
             conversation_id="conv_123"
@@ -121,7 +121,7 @@ class TestAskAIService:
         response = await service.ask_question(
             request=request,
             user_id="test_user",
-            email="test@example.com"
+            user_plan="free"
         )
         
         # Should use conversation context
@@ -160,7 +160,7 @@ class TestAskAIService:
         service = AskAIService(gemini=mock_gemini_client)
         
         # Ask about negative feedback only
-        request = AskAIRequest(
+        request = AskQuestionRequest(
             question="What are people complaining about?",
             video_id="test_video_123",
             context_filter=ContextFilter.NEGATIVE
@@ -169,7 +169,7 @@ class TestAskAIService:
         response = await service.ask_question(
             request=request,
             user_id="test_user",
-            email="test@example.com"
+            user_plan="free"
         )
         
         # Should only consider negative comments
@@ -398,7 +398,7 @@ class TestAskAIErrorHandling:
         
         service = AskAIService(gemini=mock_gemini_client)
         
-        request = AskAIRequest(
+        request = AskQuestionRequest(
             question="What are viewers saying?",
             video_id="nonexistent_video"
         )
@@ -422,7 +422,7 @@ class TestAskAIErrorHandling:
         
         # Empty question should fail validation
         with pytest.raises(ValidationError):
-            request = AskAIRequest(
+            request = AskQuestionRequest(
                 question="",  # Empty
                 video_id="video123"
             )
@@ -446,7 +446,7 @@ class TestAskAIErrorHandling:
         
         service = AskAIService(gemini=mock_gemini_client)
         
-        request = AskAIRequest(
+        request = AskQuestionRequest(
             question="What are viewers saying?",
             video_id="video123"
         )

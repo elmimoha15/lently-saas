@@ -197,225 +197,206 @@ const Analyze = () => {
 
   return (
     <MainLayout>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        className="max-w-xl mx-auto"
-      >
-        <AnimatePresence mode="wait">
-          {!isAnalyzing ? (
-            <motion.div
-              key="input"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              className="text-center"
-            >
-              <h1 className="text-3xl font-bold mb-2">Analyze New Video</h1>
-              <p className="text-muted-foreground mb-8">
-                Paste a YouTube video URL to analyze its comments
-              </p>
+      <div className="max-w-4xl mx-auto px-6 py-12">
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+        >
+          <AnimatePresence mode="wait">
+            {!isAnalyzing ? (
+              <motion.div
+                key="input"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="text-center"
+              >
+                <h1 className="text-4xl font-bold mb-3">Analyze New Video</h1>
+                <p className="text-muted-foreground mb-10">
+                  Paste a YouTube video URL to analyze its comments
+                </p>
 
-              <div className="relative mb-4">
-                <input
-                  type="url"
-                  value={url}
-                  onChange={handleUrlChange}
-                  placeholder="https://www.youtube.com/watch?v=..."
-                  className={`input-premium w-full h-14 text-base ${
-                    isValid === false ? 'border-destructive focus:border-destructive' : ''
-                  } ${isValid === true ? 'border-success focus:border-success' : ''}`}
-                />
-                {isValid !== null && (
-                  <div className="absolute right-4 top-1/2 -translate-y-1/2">
-                    {isValid ? (
-                      <Check className="w-5 h-5 text-success" />
-                    ) : (
-                      <span className="w-5 h-5 text-destructive">✕</span>
+                <div className="card-premium max-w-2xl mx-auto">
+                  <div className="relative mb-5">
+                    <input
+                      type="url"
+                      value={url}
+                      onChange={handleUrlChange}
+                      placeholder="https://www.youtube.com/watch?v=..."
+                      className={`input-premium w-full h-14 text-base ${
+                        isValid === false ? 'border-destructive focus:border-destructive' : ''
+                      } ${
+                        isValid === true ? 'border-success focus:border-success' : ''
+                      }`}
+                    />
+                    {isValid !== null && (
+                      <div className="absolute right-4 top-1/2 -translate-y-1/2">
+                        {isValid ? (
+                          <Check className="w-5 h-5 text-success" />
+                        ) : (
+                          <span className="w-5 h-5 text-destructive">✕</span>
+                        )}
+                      </div>
                     )}
                   </div>
-                )}
-              </div>
 
-              {error && (
-                <div className="flex items-center gap-2 text-sm text-destructive mb-4 justify-center">
-                  <AlertCircle className="w-4 h-4" />
-                  <span>{error}</span>
-                </div>
-              )}
-
-              <Button
-                onClick={handleAnalyze}
-                disabled={!url || isValid === false}
-                className="btn-primary w-full h-14 text-base"
-              >
-                Analyze Video
-              </Button>
-
-              <div className="flex items-center gap-4 my-8">
-                <div className="flex-1 h-px bg-border" />
-                <span className="text-sm text-muted-foreground">OR</span>
-                <div className="flex-1 h-px bg-border" />
-              </div>
-
-              <p className="text-sm text-muted-foreground mb-4">Try a sample:</p>
-              <div className="flex justify-center gap-4">
-                <Button
-                  variant="outline"
-                  onClick={() => handleSample('tech')}
-                  className="btn-secondary"
-                >
-                  📚 Tech Tutorial
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => handleSample('vlog')}
-                  className="btn-secondary"
-                >
-                  🎬 Vlog
-                </Button>
-              </div>
-            </motion.div>
-          ) : (
-            <motion.div
-              key="processing"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="text-center"
-            >
-              {/* Video Info Header (if available) */}
-              {activeAnalysis?.videoTitle && (
-                <motion.div
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="mb-6 p-4 bg-card border border-border rounded-xl flex items-center gap-4"
-                >
-                  {activeAnalysis.videoThumbnail && (
-                    <img
-                      src={activeAnalysis.videoThumbnail}
-                      alt={activeAnalysis.videoTitle}
-                      className="w-24 h-14 object-cover rounded-lg"
-                    />
+                  {error && (
+                    <div className="flex items-center gap-2 text-sm text-destructive mb-5 justify-center">
+                      <AlertCircle className="w-4 h-4" />
+                      <span>{error}</span>
+                    </div>
                   )}
-                  <div className="text-left flex-1 min-w-0">
-                    <h3 className="font-medium text-sm truncate">{activeAnalysis.videoTitle}</h3>
-                    <p className="text-xs text-muted-foreground">
-                      {activeAnalysis.totalComments?.toLocaleString() || '...'} comments
-                    </p>
-                  </div>
-                </motion.div>
-              )}
 
-              {/* Progress Header */}
-              <motion.div
-                initial={{ scale: 0.9 }}
-                animate={{ scale: 1 }}
-                className="mb-8"
-              >
-                <h1 className="text-4xl font-bold mb-4">
-                  {activeAnalysis?.step === 'failed' ? (
-                    <span className="text-destructive">Analysis Failed</span>
-                  ) : activeAnalysis?.step === 'completed' ? (
-                    <span className="text-success">Complete! 🎉</span>
-                  ) : (
-                    <>Analyzing... <span className="text-primary">{Math.round(progress)}%</span></>
-                  )}
-                </h1>
-                
-                {/* Progress Bar */}
-                <div className="w-full h-2 bg-border rounded-full overflow-hidden">
-                  <motion.div
-                    className={`h-full rounded-full ${
-                      activeAnalysis?.step === 'failed' ? 'bg-destructive' :
-                      activeAnalysis?.step === 'completed' ? 'bg-success' : 'bg-primary'
-                    }`}
-                    initial={{ width: 0 }}
-                    animate={{ width: `${progress}%` }}
-                    transition={{ duration: 0.3 }}
-                  />
+                  <Button
+                    onClick={handleAnalyze}
+                    disabled={!url || isValid === false}
+                    className="btn-primary w-full h-14 text-base"
+                  >
+                    Analyze Video
+                  </Button>
                 </div>
               </motion.div>
+            ) : (
+              <motion.div
+                key="processing"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="text-center max-w-2xl mx-auto"
+              >
+                {/* Video Info Header (if available) */}
+                {activeAnalysis?.videoTitle && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="mb-6 p-4 bg-card border border-border rounded-xl flex items-center gap-4"
+                  >
+                    {activeAnalysis.videoThumbnail && (
+                      <img
+                        src={activeAnalysis.videoThumbnail}
+                        alt={activeAnalysis.videoTitle}
+                        className="w-24 h-14 object-cover rounded-lg"
+                      />
+                    )}
+                    <div className="text-left flex-1 min-w-0">
+                      <h3 className="font-medium text-sm truncate">{activeAnalysis.videoTitle}</h3>
+                      <p className="text-xs text-muted-foreground">
+                        {activeAnalysis.totalComments?.toLocaleString() || '...'} comments
+                      </p>
+                    </div>
+                  </motion.div>
+                )}
 
-              {/* Error Message */}
-              {activeAnalysis?.step === 'failed' && activeAnalysis.error && (
+                {/* Progress Header */}
                 <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="mb-6 p-4 bg-destructive/10 border border-destructive/20 rounded-xl"
+                  initial={{ scale: 0.9 }}
+                  animate={{ scale: 1 }}
+                  className="mb-8"
                 >
-                  <div className="flex items-center gap-2 text-destructive">
-                    <AlertCircle className="w-5 h-5" />
-                    <span>{activeAnalysis.error}</span>
+                  <h1 className="text-4xl font-bold mb-4">
+                    {activeAnalysis?.step === 'failed' ? (
+                      <span className="text-destructive">Analysis Failed</span>
+                    ) : activeAnalysis?.step === 'completed' ? (
+                      <span className="text-success">Complete! 🎉</span>
+                    ) : (
+                      <>Analyzing... <span className="text-primary">{Math.round(progress)}%</span></>
+                    )}
+                  </h1>
+                  
+                  {/* Progress Bar */}
+                  <div className="progress-bar">
+                    <motion.div
+                      className={`progress-fill ${
+                        activeAnalysis?.step === 'failed' ? '!bg-destructive' :
+                        activeAnalysis?.step === 'completed' ? '!bg-success' : ''
+                      }`}
+                      initial={{ width: 0 }}
+                      animate={{ width: `${progress}%` }}
+                      transition={{ duration: 0.3 }}
+                    />
                   </div>
                 </motion.div>
-              )}
 
-              {/* Steps List */}
-              <div className="bg-card border border-border rounded-2xl p-6 text-left">
-                <div className="space-y-4">
-                  {steps.map((step, index) => (
-                    <motion.div
-                      key={step.id}
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: index * 0.05 }}
-                      className="flex items-center gap-3"
-                    >
-                      {step.status === 'complete' && (
-                        <div className="w-6 h-6 rounded-full bg-success/10 flex items-center justify-center">
-                          <Check className="w-4 h-4 text-success" />
-                        </div>
-                      )}
-                      {step.status === 'loading' && (
-                        <div className="w-6 h-6 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-                      )}
-                      {step.status === 'pending' && (
-                        <div className="w-6 h-6 rounded-full border-2 border-border" />
-                      )}
-                      <span
-                        className={`text-base ${
-                          step.status === 'complete'
-                            ? 'text-foreground'
-                            : step.status === 'loading'
-                            ? 'text-primary font-medium'
-                            : 'text-muted-foreground'
-                        }`}
-                      >
-                        {step.label}
-                        {step.detail && (
-                          <span className="text-primary ml-1">{step.detail}</span>
-                        )}
-                      </span>
-                    </motion.div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="mt-6 flex justify-center gap-4">
-                {activeAnalysis?.step === 'failed' ? (
-                  <>
-                    <Button variant="outline" onClick={handleCancel}>
-                      Cancel
-                    </Button>
-                    <Button onClick={handleRetry}>
-                      Try Again
-                    </Button>
-                  </>
-                ) : activeAnalysis?.step === 'completed' ? (
-                  <Button onClick={() => navigate(`/videos/${analysisId}`)}>
-                    View Results
-                  </Button>
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    You can navigate away - analysis will continue in the background
-                  </p>
+                {/* Error Message */}
+                {activeAnalysis?.step === 'failed' && activeAnalysis.error && (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="mb-6 p-4 bg-destructive/10 border border-destructive/20 rounded-xl"
+                  >
+                    <div className="flex items-center gap-2 text-destructive">
+                      <AlertCircle className="w-5 h-5" />
+                      <span>{activeAnalysis.error}</span>
+                    </div>
+                  </motion.div>
                 )}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </motion.div>
+
+                {/* Steps List */}
+                <div className="card-premium text-left">
+                  <div className="space-y-4">
+                    {steps.map((step, index) => (
+                      <motion.div
+                        key={step.id}
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: index * 0.05 }}
+                        className="flex items-center gap-3"
+                      >
+                        {step.status === 'complete' && (
+                          <div className="w-6 h-6 rounded-full bg-success/10 flex items-center justify-center">
+                            <Check className="w-4 h-4 text-success" />
+                          </div>
+                        )}
+                        {step.status === 'loading' && (
+                          <div className="w-6 h-6 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+                        )}
+                        {step.status === 'pending' && (
+                          <div className="w-6 h-6 rounded-full border-2 border-border" />
+                        )}
+                        <span
+                          className={`text-base ${
+                            step.status === 'complete'
+                              ? 'text-foreground'
+                              : step.status === 'loading'
+                              ? 'text-primary font-medium'
+                              : 'text-muted-foreground'
+                          }`}
+                        >
+                          {step.label}
+                          {step.detail && (
+                            <span className="text-primary ml-1">{step.detail}</span>
+                          )}
+                        </span>
+                      </motion.div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="mt-6 flex justify-center gap-4">
+                  {activeAnalysis?.step === 'failed' ? (
+                    <>
+                      <Button variant="outline" onClick={handleCancel}>
+                        Cancel
+                      </Button>
+                      <Button onClick={handleRetry}>
+                        Try Again
+                      </Button>
+                    </>
+                  ) : activeAnalysis?.step === 'completed' ? (
+                    <Button onClick={() => navigate(`/videos/${analysisId}`)}>
+                      View Results
+                    </Button>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      You can navigate away - analysis will continue in the background
+                    </p>
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.div>
+      </div>
     </MainLayout>
   );
 };

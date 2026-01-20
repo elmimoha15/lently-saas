@@ -15,6 +15,7 @@ interface InitialViewProps {
   currentConversationId: string | null;
   onLoadConversation: (conversationId: string, videoId: string) => void;
   onNewConversation: () => void;
+  onDeleteConversation: (conversationId: string) => void;
   isLoadingConversations?: boolean;
   
   // Video selector props
@@ -55,6 +56,7 @@ export const InitialView = ({
   currentConversationId,
   onLoadConversation,
   onNewConversation,
+  onDeleteConversation,
   isLoadingConversations = false,
   selectedVideo,
   selectedVideoId,
@@ -85,6 +87,7 @@ export const InitialView = ({
         currentConversationId={currentConversationId}
         onLoadConversation={onLoadConversation}
         onNewConversation={onNewConversation}
+        onDeleteConversation={onDeleteConversation}
         isLoading={isLoadingConversations}
       />
 
@@ -117,7 +120,7 @@ export const InitialView = ({
             transition={{ delay: 0.2 }}
             className="text-3xl font-bold mb-2"
           >
-            Ask AI about your videos
+            Ask AI about your Comments
           </motion.h1>
           <motion.p
             initial={{ opacity: 0, y: 10 }}

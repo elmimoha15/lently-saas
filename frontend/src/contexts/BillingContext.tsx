@@ -167,17 +167,36 @@ export const BillingProvider: React.FC<{ children: React.ReactNode }> = ({ child
           window.Paddle.Initialize({
             token: PADDLE_CLIENT_TOKEN,
             eventCallback: (event: PaddleEvent) => {
-              console.log('🔔 Paddle Event:', event.name, event.data);
+              console.log('🔔 [PADDLE EVENT]:', event.name);
+              console.log('🔔 [PADDLE EVENT] Data:', JSON.stringify(event.data, null, 2));
+              console.log('🔔 [PADDLE EVENT] Full event object:', event);
+              
+              // Log all checkout-related events for debugging
+              if (event.name.startsWith('checkout')) {
+                console.log('💳 [CHECKOUT EVENT]:', event.name);
+                if (event.name === 'checkout.error') {
+                  console.error('❌❌❌ [CHECKOUT ERROR EVENT] ❌❌❌');
+                  console.error('Error data:', event.data);
+                  console.error('Full error event:', JSON.stringify(event, null, 2));
+                  
+                  // Show user-friendly error message
+                  toast({
+                    title: 'Checkout Error',
+                    description: event.data?.error_message || 'The payment system encountered an error. Please check the console for details.',
+                    variant: 'destructive',
+                  });
+                }
+              }
               
               // Detect successful checkout completion
               if (event.name === 'checkout.completed') {
-                console.log('✅ Checkout completed event received!');
+                console.log('✅ [CHECKOUT] Completed event received!');
                 window.__LENTLY_CHECKOUT_PENDING__ = false;
                 onPaymentSuccess();
               }
               
               if (event.name === 'checkout.closed') {
-                console.log('Checkout closed');
+                console.log('🚪 [CHECKOUT] Closed event received');
                 window.__LENTLY_CHECKOUT_PENDING__ = false;
               }
             }
@@ -239,7 +258,12 @@ export const BillingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     planId: string,
     billingCycle: 'monthly' | 'yearly' = 'monthly'
   ) => {
+    console.log('🛒 [CHECKOUT START] Plan:', planId, 'Cycle:', billingCycle);
+    console.log('🛒 [CHECKOUT] Paddle ready:', isPaddleReady);
+    console.log('🛒 [CHECKOUT] Window.Paddle exists:', !!window.Paddle);
+    
     if (!isPaddleReady || !window.Paddle) {
+      console.error('❌ [CHECKOUT] Paddle not ready!');
       toast({
         title: 'Payment system loading',
         description: 'Please wait a moment and try again.',
@@ -250,37 +274,80 @@ export const BillingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     
     try {
       // Get checkout data from backend
+      console.log('📡 [CHECKOUT] Calling backend to create checkout for plan:', planId);
       const response = await billingApi.createCheckout(planId, billingCycle);
+      console.log('📡 [CHECKOUT] Backend response:', response);
       
       if (response.error) {
+        console.error('❌ [CHECKOUT] Backend returned error:', response.error);
         throw new Error(response.error.detail);
       }
       
       if (!response.data) {
+        console.error('❌ [CHECKOUT] No data in response:', response);
         throw new Error('No checkout data returned');
       }
       
       const { price_id, customer_email } = response.data;
       
-      console.log('Opening Paddle checkout with:', { price_id, customer_email, planId });
+      console.log('✅ [CHECKOUT] Received checkout data:');
+      console.log('   - price_id:', price_id);
+      console.log('   - customer_email:', customer_email);
+      console.log('   - planId:', planId);
+      
+      // Validate price_id
+      if (!price_id || price_id.trim() === '') {
+        console.error('❌ [CHECKOUT] Invalid price_id received:', price_id);
+        throw new Error('Invalid price ID received from backend');
+      }
+      
+      // Additional validation - check format
+      if (!price_id.startsWith('pri_')) {
+        console.error('❌ [CHECKOUT] Price ID has invalid format:', price_id);
+        console.error('❌ [CHECKOUT] Expected format: pri_xxxxx...');
+        throw new Error('Invalid price ID format - should start with "pri_"');
+      }
+      
+      console.log('✅ [CHECKOUT] Price ID validation passed');
       
       // Store the plan being purchased so event handler can access it
       window.__LENTLY_CHECKOUT_PLAN_ID__ = planId;
       // Mark that checkout is pending - global event handler will catch the result
       window.__LENTLY_CHECKOUT_PENDING__ = true;
       
-      // Open Paddle checkout as overlay modal
-      // Using Paddle's global eventCallback instead of inline callbacks for better reliability
-      window.Paddle.Checkout.open({
+      console.log('🚀 [CHECKOUT] Opening Paddle checkout overlay with config:');
+      const checkoutConfig = {
         items: [{ priceId: price_id, quantity: 1 }],
-        customer: { email: customer_email },
-        customData: { userId: user?.uid || '' },
+        customer: { 
+          email: customer_email,
+          // Enable automatic email filling and prefilling
+        },
+        customData: { 
+          userId: user?.uid || '',
+          userEmail: customer_email,
+        },
         settings: {
           successUrl: window.location.href,
+          displayMode: 'overlay',
+          theme: 'light',
+          locale: 'en',
+          allowLogout: false, // Prevent customer from logging out and changing email
         },
-      });
+      };
+      console.log('🚀 [CHECKOUT] Config:', JSON.stringify(checkoutConfig, null, 2));
+      
+      // Open Paddle checkout as overlay modal
+      // Using Paddle's global eventCallback instead of inline callbacks for better reliability
+      try {
+        window.Paddle.Checkout.open(checkoutConfig);
+        console.log('✅ [CHECKOUT] Paddle.Checkout.open() called successfully');
+      } catch (paddleError) {
+        console.error('❌ [CHECKOUT] Paddle.Checkout.open() failed:', paddleError);
+        throw paddleError;
+      }
     } catch (error) {
-      console.error('Checkout error:', error);
+      console.error('❌ [CHECKOUT ERROR]:', error);
+      console.error('❌ [CHECKOUT ERROR] Stack:', error instanceof Error ? error.stack : 'N/A');
       toast({
         title: 'Checkout failed',
         description: error instanceof Error ? error.message : 'Please try again',

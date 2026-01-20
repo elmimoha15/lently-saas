@@ -1,6 +1,17 @@
+import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { History, ChevronLeft, MessageSquare, Plus } from 'lucide-react';
+import { History, ChevronLeft, MessageSquare, Plus, MoreVertical, Trash2, AlertTriangle } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 export interface Conversation {
   conversation_id: string;
@@ -25,6 +36,7 @@ interface ConversationSidebarProps {
   currentConversationId: string | null;
   onLoadConversation: (conversationId: string, videoId: string) => void;
   onNewConversation: () => void;
+  onDeleteConversation: (conversationId: string) => void;
   isLoading?: boolean;
 }
 
@@ -37,8 +49,45 @@ export const ConversationSidebar = ({
   currentConversationId,
   onLoadConversation,
   onNewConversation,
+  onDeleteConversation,
   isLoading = false,
 }: ConversationSidebarProps) => {
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [conversationToDelete, setConversationToDelete] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setOpenMenuId(null);
+      }
+    };
+
+    if (openMenuId) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [openMenuId]);
+
+  const handleDeleteClick = (e: React.MouseEvent, conversationId: string) => {
+    e.stopPropagation();
+    setConversationToDelete(conversationId);
+    setOpenMenuId(null);
+  };
+
+  const confirmDelete = () => {
+    if (conversationToDelete) {
+      onDeleteConversation(conversationToDelete);
+      setConversationToDelete(null);
+    }
+  };
+
+  const toggleMenu = (e: React.MouseEvent, conversationId: string) => {
+    e.stopPropagation();
+    setOpenMenuId(openMenuId === conversationId ? null : conversationId);
+  };
+
   return (
     <div className="h-full flex-shrink-0 flex">
       {/* Collapsed state - narrow tab */}
@@ -137,41 +186,69 @@ export const ConversationSidebar = ({
                     }
 
                     return (
-                      <button
+                      <div
                         key={conv.conversation_id}
-                        onClick={() => onLoadConversation(conv.conversation_id, conv.video_id)}
-                        className={`w-full text-left p-3 rounded-lg transition-all ${
+                        className={`group relative rounded-lg transition-all ${
                           isActive
                             ? 'bg-primary/10 border border-primary/30 shadow-sm'
                             : 'hover:bg-secondary border border-transparent'
                         }`}
                       >
-                        {/* Video thumbnail */}
-                        {video?.thumbnail && (
-                          <img
-                            src={video.thumbnail}
-                            alt={video.title || ''}
-                            className="w-full h-16 rounded-md object-cover mb-2"
-                          />
-                        )}
+                        <button
+                          onClick={() => onLoadConversation(conv.conversation_id, conv.video_id)}
+                          className="w-full text-left p-3 pr-10"
+                        >
+                          {/* Video thumbnail */}
+                          {video?.thumbnail && (
+                            <img
+                              src={video.thumbnail}
+                              alt={video.title || ''}
+                              className="w-full h-16 rounded-md object-cover mb-2"
+                            />
+                          )}
+                          
+                          {/* Video title */}
+                          <p className="text-sm font-medium line-clamp-1 mb-1">
+                            {video?.title || 'Unknown Video'}
+                          </p>
+                          
+                          {/* Last message preview */}
+                          <p className="text-xs text-muted-foreground line-clamp-2 mb-2">
+                            {conv.last_message || 'No messages yet'}
+                          </p>
+                          
+                          {/* Metadata */}
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <span>{conv.question_count} questions</span>
+                            <span>•</span>
+                            <span>{timeAgo}</span>
+                          </div>
+                        </button>
                         
-                        {/* Video title */}
-                        <p className="text-sm font-medium line-clamp-1 mb-1">
-                          {video?.title || 'Unknown Video'}
-                        </p>
-                        
-                        {/* Last message preview */}
-                        <p className="text-xs text-muted-foreground line-clamp-2 mb-2">
-                          {conv.last_message || 'No messages yet'}
-                        </p>
-                        
-                        {/* Metadata */}
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <span>{conv.question_count} questions</span>
-                          <span>•</span>
-                          <span>{timeAgo}</span>
+                        {/* Three-dot menu */}
+                        <div className="absolute top-3 right-2 z-20">
+                          <button
+                            onClick={(e) => toggleMenu(e, conv.conversation_id)}
+                            className="p-1.5 bg-card hover:bg-muted rounded-md transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+                            title="More options"
+                          >
+                            <MoreVertical className="w-4 h-4 text-foreground" />
+                          </button>
+                          
+                          {/* Dropdown menu */}
+                          {openMenuId === conv.conversation_id && (
+                            <div className="absolute top-10 right-0 z-30 min-w-[180px] bg-popover border border-border rounded-lg shadow-lg overflow-hidden">
+                              <button
+                                onClick={(e) => handleDeleteClick(e, conv.conversation_id)}
+                                className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-destructive hover:bg-destructive/10 transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                                Delete conversation
+                              </button>
+                            </div>
+                          )}
                         </div>
-                      </button>
+                      </div>
                     );
                   })}
                 </div>
@@ -180,6 +257,32 @@ export const ConversationSidebar = ({
           </div>
         </motion.div>
       )}
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={conversationToDelete !== null} onOpenChange={(open) => !open && setConversationToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-10 h-10 rounded-full bg-destructive/10 flex items-center justify-center">
+                <AlertTriangle className="w-5 h-5 text-destructive" />
+              </div>
+              <AlertDialogTitle className="text-xl">Delete Conversation?</AlertDialogTitle>
+            </div>
+            <AlertDialogDescription className="text-base">
+              This will permanently delete this conversation and all its messages. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDelete}
+              className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

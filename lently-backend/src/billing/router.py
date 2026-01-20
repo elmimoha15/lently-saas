@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status, Body
 from pydantic import BaseModel
 
 from src.middleware.auth import get_current_user, AuthenticatedUser
+from src.firebase_init import get_firestore
 from .schemas import (
     PlanId,
     PLANS,
@@ -131,9 +132,15 @@ async def create_checkout(
     For redirect checkout, use the checkout_url.
     """
     try:
+        logger.info(f"🛒 [CHECKOUT] Request from user {user.email}")
+        logger.info(f"🛒 [CHECKOUT] Requested plan_id: {request.plan_id}")
+        logger.info(f"🛒 [CHECKOUT] Billing cycle: {request.billing_cycle}")
+        
         plan = get_plan(request.plan_id)
+        logger.info(f"🛒 [CHECKOUT] Found plan: {plan.name} (ID: {plan.id})")
         
         if plan.id == PlanId.FREE:
+            logger.error(f"❌ [CHECKOUT] Cannot checkout for free plan")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cannot checkout for free plan"
@@ -146,16 +153,20 @@ async def create_checkout(
             else plan.paddle_price_id_monthly
         )
         
+        logger.info(f"🛒 [CHECKOUT] Selected price_id: {price_id}")
+        logger.info(f"🛒 [CHECKOUT] Monthly price ID: {plan.paddle_price_id_monthly}")
+        logger.info(f"🛒 [CHECKOUT] Yearly price ID: {plan.paddle_price_id_yearly}")
+        
         if not price_id:
             # Return placeholder for development
             # TODO: Set real Paddle price IDs in schemas.py
-            logger.warning(f"No Paddle price ID set for {plan.id} ({request.billing_cycle})")
+            logger.error(f"❌ [CHECKOUT] No Paddle price ID set for {plan.id} ({request.billing_cycle})")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"No price ID configured for {plan.name} plan"
             )
         
-        logger.info(f"Creating checkout for user {user.email}, plan {plan.id}, price_id: {price_id}")
+        logger.info(f"✅ [CHECKOUT] Returning checkout data - price_id: {price_id}, email: {user.email}")
         
         return CheckoutResponse(
             checkout_url=None,
@@ -281,6 +292,54 @@ async def sync_subscription(
 # =============================================================================
 # Paddle Webhooks
 # =============================================================================
+
+@router.get("/transactions")
+async def get_transactions(
+    limit: int = 10,
+    user: AuthenticatedUser = Depends(get_current_user)
+):
+    """
+    Get user's transaction/billing history.
+    Returns recent transactions with invoice information.
+    """
+    try:
+        db = get_firestore()
+        transactions_ref = (
+            db.collection("users")
+            .document(user.uid)
+            .collection("billing")
+            .document("transactions")
+            .collection("history")
+            .order_by("created_at", direction="DESCENDING")
+            .limit(limit)
+        )
+        
+        transactions = []
+        for doc in transactions_ref.stream():
+            transaction_data = doc.to_dict()
+            transactions.append({
+                "id": transaction_data.get("transaction_id"),
+                "amount": transaction_data.get("amount"),
+                "currency": transaction_data.get("currency"),
+                "status": transaction_data.get("status"),
+                "created_at": transaction_data.get("created_at"),
+                "billed_at": transaction_data.get("billed_at"),
+                "invoice_number": transaction_data.get("invoice_number"),
+                "receipt_url": transaction_data.get("receipt_data", {}).get("url") if transaction_data.get("receipt_data") else None,
+                "invoice_pdf_url": transaction_data.get("receipt_data", {}).get("url") if transaction_data.get("receipt_data") else None,
+                "origin": transaction_data.get("origin"),
+            })
+        
+        logger.info(f"Retrieved {len(transactions)} transactions for user {user.uid}")
+        return {"transactions": transactions}
+        
+    except Exception as e:
+        logger.error(f"Error fetching transactions: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch billing history"
+        )
+
 
 @router.post("/webhook")
 async def paddle_webhook(request: Request):
@@ -563,24 +622,74 @@ async def handle_transaction_completed(data: dict, event_id: str):
     Handle transaction.completed event.
     This confirms payment was successful.
     For renewals, reset usage counters.
+    Stores transaction for billing history.
+    
+    NOTE: Invoice emails are sent by Paddle automatically if configured.
+    To enable invoice emails:
+    1. Go to Paddle Dashboard > Settings > Email notifications
+    2. Enable "Transaction completed" email
+    3. Customize the email template if needed
     """
     transaction_id = data.get("id")
     customer_id = data.get("customer_id")
     subscription_id = data.get("subscription_id")
     origin = data.get("origin")  # "subscription_recurring" for renewals
     
-    logger.info(f"Transaction completed: {transaction_id} (origin: {origin})")
-    logger.info(f"Transaction data keys: {list(data.keys())}")
-    logger.info(f"Transaction custom_data: {data.get('custom_data')}")
+    logger.info(f"📧 Transaction completed: {transaction_id} (origin: {origin})")
+    logger.info(f"📧 Transaction data keys: {list(data.keys())}")
+    logger.info(f"📧 Transaction custom_data: {data.get('custom_data')}")
+    logger.info(f"📧 Transaction status: {data.get('status')}")
+    logger.info(f"📧 Receipt data: {data.get('receipt_data')}")
+    logger.info(f"📧 Customer ID: {customer_id}")
     
     user_id = await get_user_id_from_webhook_data(data)
     if not user_id:
-        logger.error(f"Could not find user for transaction {transaction_id}")
+        logger.error(f"❌ Could not find user for transaction {transaction_id}")
+        logger.error(f"❌ Customer ID: {customer_id}, Custom data: {data.get('custom_data')}")
         return
+    
+    logger.info(f"✅ Found user {user_id} for transaction {transaction_id}")
     
     # Store customer mapping for future lookups
     if customer_id:
         await store_paddle_customer_mapping(user_id, customer_id)
+    
+    # Store transaction for billing history
+    try:
+        db = get_firestore()
+        transaction_ref = (
+            db.collection("users")
+            .document(user_id)
+            .collection("billing")
+            .document("transactions")
+            .collection("history")
+            .document(transaction_id)
+        )
+        
+        # Extract invoice/receipt URL from details
+        details = data.get("details", {})
+        line_items = details.get("line_items", [])
+        
+        transaction_data = {
+            "transaction_id": transaction_id,
+            "status": data.get("status"),
+            "amount": details.get("totals", {}).get("total"),
+            "currency": data.get("currency_code"),
+            "created_at": parse_paddle_date(data.get("created_at")),
+            "billed_at": parse_paddle_date(data.get("billed_at")),
+            "origin": origin,
+            "subscription_id": subscription_id,
+            "invoice_number": data.get("invoice_number"),
+            "receipt_data": data.get("receipt_data"),  # Contains invoice PDF URL
+            "checkout": data.get("checkout"),  # Contains checkout details
+            "line_items": line_items,
+            "updated_at": datetime.utcnow().isoformat(),
+        }
+        
+        transaction_ref.set(transaction_data)
+        logger.info(f"Stored transaction {transaction_id} for user {user_id}")
+    except Exception as e:
+        logger.error(f"Failed to store transaction: {e}")
     
     # For recurring payments (renewals), reset usage
     if origin == "subscription_recurring":

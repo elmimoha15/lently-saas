@@ -173,9 +173,15 @@ Write a 3-4 paragraph executive summary that:
 
 Be direct, specific, and actionable. Use actual numbers from the data.
 
+## FORMATTING RULES
+- Use [b]text[/b] to emphasize important words, numbers, or phrases (e.g., [b]48% positive sentiment[/b])
+- Do NOT use asterisks (**) or other markdown formatting
+- Emphasize key metrics, sentiments, and action items with [b] tags
+- Keep the text clean and professional
+
 ## RESPONSE FORMAT (JSON)
 {{
-  "executive_summary": "Your 3-4 paragraph summary here...",
+  "executive_summary": "Your 3-4 paragraph summary here with [b]emphasized text[/b]...",
   "key_metrics": {{
     "sentiment_score": 75,
     "engagement_quality": "high",

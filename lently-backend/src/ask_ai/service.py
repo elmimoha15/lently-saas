@@ -6,6 +6,7 @@ Handles conversational AI for answering creator questions about their comments
 import json
 import logging
 import uuid
+import re
 from datetime import datetime
 from typing import Optional
 
@@ -35,11 +36,369 @@ class AskAIService:
     
     Allows creators to have a conversation about their video's comments.
     Maintains conversation history and provides contextual answers.
+    Filters out spam and low-value comments automatically.
     """
     
     def __init__(self, gemini: GeminiClient = None):
         self.gemini = gemini or get_gemini_client()
         self.db = get_firestore()
+    
+    def _anonymize_usernames(self, text: str) -> str:
+        """
+        Remove YouTube usernames from text and replace with anonymous references.
+        
+        Replaces patterns like:
+        - @username -> "a viewer"
+        - @JohnDoe123 -> "someone"
+        - Multiple @mentions in a list -> "several viewers"
+        
+        Args:
+            text: The text to anonymize
+            
+        Returns:
+            Text with usernames removed
+        """
+        # Count username mentions
+        username_pattern = r'@[A-Za-z0-9_-]+'
+        usernames = re.findall(username_pattern, text)
+        
+        if not usernames:
+            return text
+        
+        # Replace each unique username
+        anonymized = text
+        for username in set(usernames):
+            # Replace with generic reference
+            anonymized = re.sub(
+                re.escape(username) + r'(?=[,\s\.\?!]|$)',
+                "a viewer",
+                anonymized
+            )
+        
+        return anonymized
+    
+    def _filter_spam_and_low_value(self, comments: list[dict]) -> list[dict]:
+        """
+        Remove comments that don't provide strategic value.
+        
+        ALWAYS IGNORE:
+        - Generic praise ("great video!", "nice!", "first!")
+        - Obvious spam/bots
+        - Promotional spam
+        - Pure trolling with no feedback
+        
+        ALWAYS KEEP:
+        - Specific questions
+        - Detailed feedback (positive or negative)
+        - Content requests
+        - Constructive criticism
+        - Timestamp references
+        
+        Args:
+            comments: List of comment dictionaries
+            
+        Returns:
+            Filtered list of valuable comments
+        """
+        spam_patterns = [
+            r"^(first|second|third)!?$",
+            r"^(nice|great|awesome|amazing|good|love) video!?$",
+            r"^(love it|loved this|nice one)!?$",
+            r"(check out my channel|subscribe to me|sub[s]? to my)",
+            r"^[❤️🔥👍💯✨🙏😍😊👌💪🎉]+$",  # Only emojis
+            r"^\d+$",  # Only numbers
+        ]
+        
+        min_word_count = 5  # Comments must have substance
+        
+        valuable = []
+        for comment in comments:
+            text = comment.get("text", "").strip()
+            text_lower = text.lower()
+            
+            # Skip if too short
+            if len(text.split()) < min_word_count:
+                continue
+            
+            # Skip if matches spam patterns
+            is_spam = any(re.match(pattern, text_lower, re.IGNORECASE) for pattern in spam_patterns)
+            if is_spam:
+                continue
+            
+            # Keep comments with substance
+            valuable.append(comment)
+        
+        logger.info(f"Filtered {len(comments)} comments down to {len(valuable)} valuable comments")
+        return valuable
+    
+    def _group_similar_questions(self, comments: list[dict]) -> list[dict]:
+        """
+        Group similar questions to show demand patterns.
+        
+        Returns list of question groups with:
+        - question_theme: Representative question
+        - count: How many times asked
+        - examples: Sample questions
+        - demand_level: high/medium/low
+        
+        Args:
+            comments: List of comment dictionaries
+            
+        Returns:
+            List of grouped questions sorted by frequency
+        """
+        # Filter to question-type comments
+        questions = []
+        for c in comments:
+            text = c.get("text", "")
+            if c.get("is_question") or "?" in text:
+                questions.append(c)
+        
+        if not questions:
+            return []
+        
+        # Simple keyword-based grouping
+        # For better results, could use embeddings or Gemini
+        groups = {}
+        
+        for comment in questions:
+            text = comment.get("text", "").lower()
+            
+            # Extract key topics (simplified approach)
+            # Remove common words and extract meaningful keywords
+            common_words = {'the', 'a', 'an', 'is', 'are', 'was', 'were', 'what', 'how', 'why', 
+                          'when', 'where', 'who', 'which', 'do', 'does', 'did', 'can', 'could',
+                          'would', 'should', 'your', 'you', 'this', 'that', 'these', 'those'}
+            
+            words = re.findall(r'\b\w+\b', text)
+            keywords = [w for w in words if w not in common_words and len(w) > 3][:5]
+            
+            # Group by similar keywords (simplified)
+            group_key = tuple(sorted(keywords[:3])) if keywords else ("general",)
+            
+            if group_key not in groups:
+                groups[group_key] = {
+                    "examples": [],
+                    "count": 0,
+                    "full_texts": []
+                }
+            
+            groups[group_key]["examples"].append(text[:150])  # Limit length
+            groups[group_key]["full_texts"].append(comment.get("text", ""))
+            groups[group_key]["count"] += 1
+        
+        # Format output
+        result = []
+        for keywords, data in sorted(groups.items(), key=lambda x: x[1]["count"], reverse=True):
+            if data["count"] >= 2:  # Minimum 2 similar questions
+                result.append({
+                    "question_theme": data["full_texts"][0][:200],  # Use first as representative
+                    "count": data["count"],
+                    "examples": data["examples"][:3],
+                    "demand_level": "high" if data["count"] >= 10 else "medium" if data["count"] >= 5 else "low"
+                })
+        
+        return result[:10]  # Top 10 question groups
+    
+    def _identify_superfans(self, comments: list[dict]) -> list[dict]:
+        """
+        Identify community members who add value and deserve recognition.
+        
+        Superfan criteria:
+        - Multiple thoughtful comments (not just "nice!")
+        - Asks constructive questions
+        - Provides detailed feedback
+        - High engagement (likes, replies)
+        
+        Args:
+            comments: List of comment dictionaries
+            
+        Returns:
+            List of top superfans with engagement scores
+        """
+        # Group by author
+        author_stats = {}
+        
+        for comment in comments:
+            author = comment.get("author", "Unknown")
+            text = comment.get("text", "")
+            word_count = len(text.split())
+            
+            if author == "Unknown" or author == "Viewer":
+                continue
+            
+            if author not in author_stats:
+                author_stats[author] = {
+                    "author": author,
+                    "comment_count": 0,
+                    "total_words": 0,
+                    "total_likes": 0,
+                    "has_questions": False,
+                    "has_feedback": False,
+                    "comments": []
+                }
+            
+            author_stats[author]["comment_count"] += 1
+            author_stats[author]["total_words"] += word_count
+            author_stats[author]["total_likes"] += comment.get("like_count", 0)
+            author_stats[author]["comments"].append(text[:200])
+            
+            if "?" in text:
+                author_stats[author]["has_questions"] = True
+            if comment.get("is_feedback") or comment.get("category") in ["feedback", "suggestion"]:
+                author_stats[author]["has_feedback"] = True
+        
+        # Calculate engagement scores
+        superfans = []
+        for author, stats in author_stats.items():
+            if stats["comment_count"] < 2:  # Must comment at least twice
+                continue
+            
+            # Scoring algorithm
+            score = (
+                stats["comment_count"] * 10 +  # Multiple comments = engaged
+                min(stats["total_words"], 500) / 10 +  # Thoughtful but not spam
+                stats["total_likes"] * 2 +  # Community values their input
+                (20 if stats["has_questions"] else 0) +  # Asks questions
+                (20 if stats["has_feedback"] else 0)  # Provides feedback
+            )
+            
+            superfans.append({
+                "author": author,
+                "engagement_score": int(score),
+                "comment_count": stats["comment_count"],
+                "total_likes": stats["total_likes"],
+                "latest_comment": stats["comments"][-1],
+                "reason": self._get_superfan_reason(stats)
+            })
+        
+        # Sort by engagement score
+        superfans.sort(key=lambda x: x["engagement_score"], reverse=True)
+        return superfans[:10]  # Top 10
+    
+    def _get_superfan_reason(self, stats: dict) -> str:
+        """Generate reason why this person is a superfan"""
+        reasons = []
+        if stats["comment_count"] >= 3:
+            reasons.append("Frequent commenter")
+        if stats["total_likes"] >= 20:
+            reasons.append("High community engagement")
+        if stats["has_questions"]:
+            reasons.append("Asks thoughtful questions")
+        if stats["has_feedback"]:
+            reasons.append("Provides valuable feedback")
+        
+        return ", ".join(reasons) if reasons else "Engaged community member"
+    
+    def _extract_content_requests(self, comments: list[dict]) -> list[dict]:
+        """
+        Find what viewers want next - video ideas from comment requests.
+        
+        Patterns detected:
+        - "Can you make a video about..."
+        - "I'd love to see..."
+        - "Please do a tutorial on..."
+        - "Next video should be..."
+        
+        Args:
+            comments: List of comment dictionaries
+            
+        Returns:
+            Ranked list of content ideas by demand
+        """
+        request_patterns = [
+            r"make\s+(?:a\s+)?video\s+(?:about|on|for)\s+(.+?)(?:\?|$|\.)",
+            r"(?:would|could)\s+you\s+(?:do|make|create)\s+(.+?)(?:\?|$|\.)",
+            r"tutorial\s+(?:on|about|for)\s+(.+?)(?:\?|$|\.)",
+            r"(?:i'd|i\s+would)\s+love\s+to\s+see\s+(.+?)(?:\?|$|\.)",
+            r"please\s+(?:cover|do|make|show)\s+(.+?)(?:\?|$|\.)",
+            r"next\s+video\s+(?:should|could)\s+be\s+(?:about\s+)?(.+?)(?:\?|$|\.)",
+            r"can\s+you\s+(?:explain|show|teach)\s+(?:us\s+)?(?:how\s+to\s+)?(.+?)(?:\?|$|\.)",
+        ]
+        
+        requests = {}
+        request_examples = {}
+        
+        for comment in comments:
+            text = comment.get("text", "")
+            text_lower = text.lower()
+            
+            for pattern in request_patterns:
+                matches = re.findall(pattern, text_lower, re.IGNORECASE)
+                for match in matches:
+                    # Clean up the matched topic
+                    topic = match.strip()
+                    
+                    # Remove trailing punctuation
+                    topic = re.sub(r'[.,!?]+$', '', topic)
+                    
+                    # Skip if too short or too long
+                    if len(topic) < 5 or len(topic) > 100:
+                        continue
+                    
+                    # Normalize similar requests
+                    topic_key = topic[:50].lower()
+                    
+                    if topic_key not in requests:
+                        requests[topic_key] = 0
+                        request_examples[topic_key] = {
+                            "topic": topic[:80],
+                            "example_comment": text[:200]
+                        }
+                    
+                    requests[topic_key] += 1
+        
+        # Format and rank
+        result = []
+        for topic_key, count in sorted(requests.items(), key=lambda x: x[1], reverse=True):
+            info = request_examples[topic_key]
+            result.append({
+                "topic": info["topic"],
+                "demand": count,
+                "example_comment": info["example_comment"],
+                "priority": "high" if count >= 5 else "medium" if count >= 3 else "low",
+                "video_title_suggestion": f"Complete Guide to {info['topic'].title()}"
+            })
+        
+        return result[:10]  # Top 10
+    
+    def _preprocess_comments_for_strategy(self, comments: list[dict]) -> dict:
+        """
+        Preprocess comments to extract strategic insights BEFORE sending to AI.
+        
+        This reduces token usage and makes AI responses more strategic.
+        
+        Args:
+            comments: List of comment dictionaries
+            
+        Returns:
+            Dictionary with grouped insights:
+            - valuable_comments: Filtered valuable comments
+            - question_groups: Grouped questions with frequency
+            - superfans: Top community members
+            - content_requests: Video ideas by demand
+        """
+        # Filter spam first
+        valuable_comments = self._filter_spam_and_low_value(comments)
+        
+        # Extract strategic insights
+        question_groups = self._group_similar_questions(valuable_comments)
+        superfans = self._identify_superfans(valuable_comments)
+        content_requests = self._extract_content_requests(valuable_comments)
+        
+        logger.info(
+            f"Strategic preprocessing: {len(valuable_comments)} valuable comments, "
+            f"{len(question_groups)} question groups, "
+            f"{len(superfans)} superfans, "
+            f"{len(content_requests)} content requests"
+        )
+        
+        return {
+            "valuable_comments": valuable_comments,
+            "question_groups": question_groups,
+            "superfans": superfans,
+            "content_requests": content_requests
+        }
     
     async def ask_question(
         self,
@@ -92,11 +451,17 @@ class AskAIService:
             context_filter=request.context_filter
         )
         
+        # Extract strategic insights from ALL comments (not just relevant ones)
+        # This gives the AI richer context for strategic questions
+        all_comments = analysis_data.get("comments", [])
+        strategic_data = self._preprocess_comments_for_strategy(all_comments)
+        
         # Build the prompt with context filter for focused answers
         prompt = self._build_prompt(
             question=request.question,
             context=context,
             comments=relevant_comments,
+            strategic_data=strategic_data,
             conversation_history=conversation.messages[-MAX_CONVERSATION_HISTORY:],
             context_filter=request.context_filter
         )
@@ -117,6 +482,10 @@ class AskAIService:
         key_points = result.get("key_points", [])
         follow_ups = result.get("follow_up_questions", [])
         
+        # Anonymize any usernames that may have slipped through
+        answer = self._anonymize_usernames(answer)
+        key_points = [self._anonymize_usernames(kp) for kp in key_points]
+        
         # Build source comments
         sources = []
         source_ids = result.get("sources", [])
@@ -129,6 +498,12 @@ class AskAIService:
                     relevance="Directly related to your question"
                 ))
         
+        # Prepare simplified sources for storage (no complex objects)
+        sources_data = [
+            {"author": s.author, "text": s.text}
+            for s in sources
+        ]
+        
         # Update conversation history
         conversation.messages.append(ConversationMessage(
             role=MessageRole.USER,
@@ -136,7 +511,10 @@ class AskAIService:
         ))
         conversation.messages.append(ConversationMessage(
             role=MessageRole.ASSISTANT,
-            content=answer
+            content=answer,
+            key_points=key_points,
+            follow_up_questions=follow_ups,
+            sources=sources_data
         ))
         conversation.question_count += 1
         conversation.updated_at = datetime.utcnow()
@@ -238,7 +616,7 @@ class AskAIService:
         """
         Get comments most relevant to the question
         
-        Filters based on context_filter and returns formatted comments
+        Filters out spam/low-value comments, then filters based on context_filter
         """
         # Get stored comments from analysis
         stored_comments = analysis_data.get("stored_comments", [])
@@ -270,6 +648,9 @@ class AskAIService:
                     "is_feedback": class_data.get("primary_category") in ["feedback", "suggestion"]
                 })
         
+        # FIRST: Filter out spam and low-value comments
+        stored_comments = self._filter_spam_and_low_value(stored_comments)
+        
         relevant_comments = []
         
         for comment in stored_comments:
@@ -278,7 +659,7 @@ class AskAIService:
             is_question = comment.get("is_question", False)
             is_feedback = comment.get("is_feedback", False)
             
-            # Apply filter
+            # Apply context filter
             if context_filter == ContextFilter.POSITIVE and sentiment != "positive":
                 continue
             elif context_filter == ContextFilter.NEGATIVE and sentiment != "negative":
@@ -304,15 +685,61 @@ class AskAIService:
         
         return relevant_comments[:MAX_COMMENTS_IN_PROMPT]
     
+    def _format_strategic_insights(self, strategic_data: dict) -> str:
+        """
+        Format strategic preprocessing results into readable text for AI.
+        
+        Args:
+            strategic_data: Output from _preprocess_comments_for_strategy()
+            
+        Returns:
+            Formatted string with insights
+        """
+        insights = []
+        
+        # Question groups
+        question_groups = strategic_data.get("question_groups", [])
+        if question_groups:
+            insights.append("### POPULAR QUESTIONS (Grouped by Theme)")
+            for group in question_groups[:5]:
+                insights.append(
+                    f"- {group['count']} viewers asked about: \"{group['question_theme']}\""
+                )
+                if group.get('examples'):
+                    insights.append(f"  Examples: {group['examples'][0]}")
+        
+        # Content requests
+        content_requests = strategic_data.get("content_requests", [])
+        if content_requests:
+            insights.append("\n### VIDEO IDEAS REQUESTED BY VIEWERS")
+            for req in content_requests[:5]:
+                insights.append(
+                    f"- {req['demand']} viewer{'s' if req['demand'] > 1 else ''} "
+                    f"requested: \"{req['topic']}\" ({req['priority']} priority)"
+                )
+        
+        # Superfans
+        superfans = strategic_data.get("superfans", [])
+        if superfans:
+            insights.append("\n### TOP COMMUNITY MEMBERS")
+            for fan in superfans[:5]:
+                insights.append(
+                    f"- {fan['author']}: {fan['comment_count']} comments, "
+                    f"{fan['total_likes']} likes ({fan['reason']})"
+                )
+        
+        return "\n".join(insights) if insights else ""
+    
     def _build_prompt(
         self,
         question: str,
         context: ConversationContext,
         comments: list[dict],
+        strategic_data: dict,
         conversation_history: list[ConversationMessage],
         context_filter: ContextFilter = ContextFilter.ALL
     ) -> str:
-        """Build the complete prompt for Gemini"""
+        """Build the complete prompt for Gemini with strategic insights"""
         # Format conversation history
         history_text = ""
         if conversation_history:
@@ -323,6 +750,9 @@ class AskAIService:
         
         # Format comments
         comments_json = json.dumps(comments[:MAX_COMMENTS_IN_PROMPT], indent=2)
+        
+        # Format strategic insights
+        strategic_context = self._format_strategic_insights(strategic_data)
         
         # Build summary strings
         sentiment_summary = context.sentiment_summary or "Not analyzed"
@@ -343,6 +773,10 @@ class AskAIService:
             comments_json=comments_json,
             question=question
         )
+        
+        # Append strategic insights
+        if strategic_context:
+            prompt += f"\n\n## STRATEGIC INSIGHTS (Pre-analyzed)\n{strategic_context}"
         
         # Add context filter instruction at the top of the prompt
         prompt = f"{context_instruction}\n\n{prompt}"
@@ -527,6 +961,37 @@ class AskAIService:
         except Exception as e:
             logger.error(f"Error fetching conversations: {e}")
             return []
+    
+    async def delete_conversation(
+        self,
+        conversation_id: str,
+        user_id: str
+    ) -> bool:
+        """
+        Delete a conversation
+        
+        Args:
+            conversation_id: The conversation to delete
+            user_id: The user requesting deletion (for permission check)
+            
+        Returns:
+            True if deleted successfully, False if not found or permission denied
+        """
+        try:
+            # Check if conversation exists and belongs to user
+            conversation = await self._get_conversation(conversation_id, user_id)
+            if not conversation:
+                logger.warning(f"Conversation {conversation_id} not found or doesn't belong to user {user_id}")
+                return False
+            
+            # Delete the conversation document
+            self.db.collection("conversations").document(conversation_id).delete()
+            logger.info(f"Deleted conversation {conversation_id} for user {user_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error deleting conversation {conversation_id}: {e}")
+            return False
 
 
 # Singleton

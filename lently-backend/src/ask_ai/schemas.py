@@ -31,6 +31,10 @@ class ConversationMessage(BaseModel):
     role: MessageRole
     content: str
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+    # Optional metadata for AI responses
+    key_points: Optional[list[str]] = None
+    follow_up_questions: Optional[list[str]] = None
+    sources: Optional[list[dict]] = None  # Simplified source data
 
 
 class ConversationContext(BaseModel):

@@ -105,11 +105,26 @@ const AskAI = () => {
     enabled: !!selectedVideoId,
   });
 
-  // Default actionable suggestions
+  // Default actionable suggestions - diverse question types
   const suggestions = suggestionsData?.suggestions || [
-    'What video should I make next based on these comments?',
-    'What did viewers love that I should keep doing?',
-    'What confused or frustrated viewers?',
+    // Strategic questions
+    'What video should I make next based on audience demand?',
+    'What should I improve in my next video?',
+    
+    // Analytical questions  
+    'What did people complain about?',
+    'What confused viewers the most?',
+    
+    // Sentiment questions
+    'Is this video a hit?',
+    'Do they really love it?',
+    
+    // Community questions
+    'Who are my superfans I should engage with?',
+    'What are the top questions I should answer?',
+    
+    // Exploratory questions
+    "What's the most interesting pattern in the comments?",
   ];
 
   // =========================================================================
@@ -138,6 +153,10 @@ const AskAI = () => {
           role: msg.role === 'user' ? 'user' : 'ai',
           content: msg.content,
           timestamp: msg.timestamp || 'Earlier',
+          // Include enriched metadata for AI messages
+          ...(msg.key_points && { keyPoints: msg.key_points }),
+          ...(msg.follow_up_questions && { followUpQuestions: msg.follow_up_questions }),
+          ...(msg.sources && { sources: msg.sources })
         }));
 
         setMessages(loadedMessages);
@@ -275,6 +294,26 @@ const AskAI = () => {
     navigate('/ai', { replace: true });
   };
 
+  const handleDeleteConversation = async (conversationIdToDelete: string) => {
+    try {
+      const response = await askAiApi.deleteConversation(conversationIdToDelete);
+      if (response.error) {
+        console.error('Failed to delete conversation:', response.error);
+        return;
+      }
+      
+      // If we deleted the current conversation, reset the chat
+      if (conversationIdToDelete === conversationId) {
+        handleNewConversation();
+      }
+      
+      // Refresh the conversations list
+      refetchConversations();
+    } catch (error) {
+      console.error('Error deleting conversation:', error);
+    }
+  };
+
   // Scroll to bottom when messages change
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -308,6 +347,7 @@ const AskAI = () => {
     currentConversationId: conversationId,
     onLoadConversation: handleLoadConversation,
     onNewConversation: handleNewConversation,
+    onDeleteConversation: handleDeleteConversation,
     isLoadingConversations,
   };
   

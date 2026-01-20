@@ -387,6 +387,15 @@ export const askAiApi = {
     }>(`/api/ask/suggestions/${videoId}`),
 
   /**
+   * Delete a conversation
+   */
+  deleteConversation: (conversationId: string) =>
+    api.delete<{
+      success: boolean;
+      message: string;
+    }>(`/api/ask/conversation/${conversationId}`),
+
+  /**
    * Get user's question quota
    */
   getQuota: () =>
@@ -442,6 +451,19 @@ export interface PlanData {
   custom_integrations: boolean;
   unlimited_ai: boolean;
   paddle_price_id_monthly: string | null;
+}
+
+export interface TransactionData {
+  id: string;
+  amount: string;
+  currency: string;
+  status: string;
+  created_at: string;
+  billed_at: string;
+  invoice_number: string | null;
+  receipt_url: string | null;
+  invoice_pdf_url: string | null;
+  origin: string;
 }
 
 export interface BillingInfo {
@@ -531,6 +553,12 @@ export const billingApi = {
     api.post<{ success: boolean }>('/api/billing/link-customer', {
       paddle_customer_id: paddleCustomerId,
     }),
+
+  /**
+   * Get billing history / transactions
+   */
+  getTransactions: (limit: number = 10) =>
+    api.get<{ transactions: TransactionData[] }>(`/api/billing/transactions?limit=${limit}`),
 };
 
 export default api;

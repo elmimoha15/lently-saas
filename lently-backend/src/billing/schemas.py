@@ -100,7 +100,7 @@ PLANS: Dict[PlanId, Plan] = {
         custom_integrations=False,
         unlimited_ai=False,
         paddle_product_id=PADDLE_PRODUCT_ID,
-        paddle_price_id_monthly="pri_01kf39v5bm1lr0jbbxa911px27",
+        paddle_price_id_monthly="pri_01kfedypx5bebb3frsbbpwctsm",
         paddle_price_id_yearly=None,
     ),
     PlanId.BUSINESS: Plan(

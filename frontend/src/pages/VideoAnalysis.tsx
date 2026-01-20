@@ -1,17 +1,19 @@
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, MessageSquare, CheckCircle, Loader2, AlertCircle, Check } from 'lucide-react';
+import { ArrowLeft, AlertCircle, Loader2, MessageSquare, Lightbulb, Video } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Button } from '@/components/ui/button';
+import { HeroInsightSection } from '@/components/video/HeroInsightSection';
 import { SentimentChart } from '@/components/video/SentimentChart';
 import { CategoryBreakdown } from '@/components/video/CategoryBreakdown';
 import { TopicPills } from '@/components/video/TopicPills';
-import { CommentCard } from '@/components/video/CommentCard';
-import { useState, useEffect } from 'react';
+import { CommentsExplorer } from '@/components/video/CommentsExplorer';
+import { AnalysisProgressDisplay } from '@/components/video/AnalysisProgressDisplay';
+import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { analysisApi } from '@/services/api.service';
 import { useActiveAnalysis } from '@/contexts/AnalysisContext';
-import type { AnalysisResponse, AnalysisStep } from '@/types/analysis';
+import type { AnalysisStep } from '@/types/analysis';
 
 // Step labels for progress display
 const STEP_LABELS: Record<AnalysisStep, string> = {
@@ -31,7 +33,6 @@ const STEP_LABELS: Record<AnalysisStep, string> = {
 const VideoAnalysis = () => {
   const { videoId } = useParams<{ videoId: string }>();
   const navigate = useNavigate();
-  const [activeFilter, setActiveFilter] = useState('All');
   
   // Check if this analysis is currently active/processing
   const { analysis: activeAnalysis, isActive } = useActiveAnalysis(videoId || null);
@@ -200,26 +201,6 @@ const VideoAnalysis = () => {
 
   const topics = insights?.key_themes?.slice(0, 8).map(t => t.theme) || [];
 
-  // Filter comments by category
-  const filterOptions = ['All', 'Questions', 'Praise', 'Complaints', 'Suggestions'];
-  
-  const filteredComments = (() => {
-    if (activeFilter === 'All') return storedComments;
-    
-    // Map filter names to backend category names
-    const categoryMap: Record<string, string[]> = {
-      'Questions': ['question'],
-      'Praise': ['appreciation', 'praise'],
-      'Complaints': ['complaint', 'criticism'],
-      'Suggestions': ['suggestion', 'feedback'],
-    };
-    
-    const acceptedCategories = categoryMap[activeFilter] || [];
-    return storedComments.filter((c) => 
-      acceptedCategories.includes(c.category?.toLowerCase() || '')
-    );
-  })();
-
   const daysSinceAnalysis = Math.ceil(
     (new Date().getTime() - new Date(analysisData.created_at).getTime()) / (1000 * 60 * 60 * 24)
   );
@@ -229,239 +210,151 @@ const VideoAnalysis = () => {
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        className="space-y-10"
+        className="max-w-7xl mx-auto space-y-12 pb-20"
       >
-        {/* Back Navigation */}
+        {/* Back Navigation - Minimal Apple Style */}
         <Link
           to="/videos"
-          className="inline-flex items-center gap-2 text-muted-foreground hover:text-primary transition-colors group"
+          className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
-          <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
-          Back to Videos
+          <ArrowLeft className="w-4 h-4" />
+          Videos
         </Link>
 
-        {/* Executive Summary */}
-        {executiveSummary && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="card-premium bg-gradient-to-r from-primary/5 to-transparent border-primary/20"
-          >
-            <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
-              <span>✨</span> Executive Summary
-            </h3>
-            <p className="text-foreground leading-relaxed">{executiveSummary.summary_text}</p>
-            {executiveSummary.priority_actions && executiveSummary.priority_actions.length > 0 && (
-              <div className="mt-4">
-                <h4 className="text-sm font-medium text-muted-foreground mb-2">Priority Actions:</h4>
-                <ul className="space-y-1">
-                  {executiveSummary.priority_actions.slice(0, 3).map((action, i) => (
-                    <li key={i} className="text-sm flex items-start gap-2">
-                      <Check className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
-                      <span>{action}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </motion.div>
-        )}
+        {/* Hero Insight - Primary Focus */}
+        <HeroInsightSection
+          executiveSummary={executiveSummary}
+          sentimentData={sentimentData}
+          categories={categories}
+          commentsAnalyzed={analysisData.comments_analyzed || 0}
+        />
 
-        {/* Video Header */}
-        <div className="flex flex-col lg:flex-row gap-8">
-          <div className="lg:w-[400px] flex-shrink-0">
-            <div className="aspect-video rounded-xl overflow-hidden">
+        {/* Video Description with Thumbnail - Clean Apple Card */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+          className="bg-card rounded-2xl border border-border overflow-hidden"
+        >
+          <div className="md:flex">
+            {/* Thumbnail */}
+            <div className="md:w-[420px] flex-shrink-0 bg-muted">
               <img
                 src={video.thumbnail_url}
                 alt={video.title}
-                className="w-full h-full object-cover"
+                className="w-full h-full object-cover aspect-video md:aspect-auto md:min-h-[280px]"
               />
             </div>
-          </div>
-          <div className="flex-1">
-            <h1 className="text-2xl font-bold">{video.title}</h1>
-            <div className="flex items-center gap-2 mt-2 text-muted-foreground">
-              <span>by {video.channel_title}</span>
-              <CheckCircle className="w-4 h-4 text-primary" />
+            
+            {/* Video Info */}
+            <div className="p-8 flex-1">
+              <h1 className="text-3xl font-semibold tracking-tight mb-3">
+                {video.title}
+              </h1>
+              <p className="text-muted-foreground mb-6">
+                {video.channel_title}
+              </p>
+              
+              {/* Stats - Minimal */}
+              <div className="flex items-center gap-6 text-sm text-muted-foreground mb-8">
+                <span>{video.view_count.toLocaleString()} views</span>
+                <span>•</span>
+                <span>{video.comment_count.toLocaleString()} comments</span>
+                <span>•</span>
+                <span>{(analysisData.comments_analyzed || 0).toLocaleString()} analyzed</span>
+              </div>
+
+              {/* Ask AI Button - Prominent */}
+              <Link to={`/ai/${video.video_id}`}>
+                <Button size="lg" className="rounded-full px-6">
+                  <MessageSquare className="w-4 h-4 mr-2" />
+                  Ask AI About This Video
+                </Button>
+              </Link>
             </div>
-            <p className="text-sm text-muted-foreground mt-2">
-              {(analysisData.comments_analyzed || 0).toLocaleString()} comments analyzed • {video.view_count.toLocaleString()} views • Analyzed {daysSinceAnalysis} day{daysSinceAnalysis !== 1 ? 's' : ''} ago
-            </p>
-
-            <Link to={`/ai/${video.video_id}`} className="mt-6 block">
-              <Button className="btn-primary flex items-center gap-2 w-full lg:w-auto">
-                <MessageSquare className="w-5 h-5" />
-                💬 Ask AI About This Video
-              </Button>
-            </Link>
           </div>
-        </div>
+        </motion.div>
 
-        {/* Overview Section */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          <div className="card-premium">
-            <h3 className="text-lg font-semibold mb-6">Sentiment Breakdown</h3>
+        {/* Sentiment & Next Video Grid */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="grid md:grid-cols-2 gap-8"
+        >
+          {/* Sentiment Analysis - Circular Chart */}
+          <div className="bg-card rounded-2xl border border-border p-8">
+            <h2 className="text-2xl font-semibold mb-6">Sentiment Overview</h2>
             <SentimentChart sentiment={sentimentData} />
           </div>
-          <div className="card-premium">
-            <h3 className="text-lg font-semibold mb-6">Category Breakdown</h3>
-            <CategoryBreakdown categories={categories} />
-          </div>
-        </div>
 
-        {/* Top Topics */}
-        {topics.length > 0 && (
-          <div className="card-premium">
-            <h3 className="text-lg font-semibold mb-4">Top Topics Discussed</h3>
-            <TopicPills topics={topics} />
-          </div>
-        )}
-
-        {/* Audience Insights */}
-        {insights?.audience_insights && insights.audience_insights.length > 0 && (
-          <div className="card-premium">
-            <h3 className="text-lg font-semibold mb-4">Audience Insights</h3>
-            <div className="space-y-4">
-              {insights.audience_insights.slice(0, 5).map((insight, i) => (
-                <div key={i} className="p-4 bg-background-secondary rounded-lg">
-                  <p className="font-medium">{insight.insight}</p>
-                  {insight.evidence && (
-                    <p className="text-sm text-muted-foreground mt-1">{insight.evidence}</p>
-                  )}
-                  {insight.action_item && (
-                    <p className="text-sm text-primary mt-2 flex items-center gap-2">
-                      <span>💡</span> {insight.action_item}
-                    </p>
-                  )}
+          {/* Your Next Video - List Format */}
+          {insights?.content_ideas && insights.content_ideas.length > 0 && (
+            <div className="bg-gradient-to-br from-primary/5 to-transparent rounded-2xl border border-primary/20 p-8">
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                  <Video className="w-5 h-5 text-primary" />
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Content Ideas */}
-        {insights?.content_ideas && insights.content_ideas.length > 0 && (
-          <div className="card-premium">
-            <h3 className="text-lg font-semibold mb-4">Content Ideas from Comments</h3>
-            <div className="grid gap-4 md:grid-cols-2">
-              {insights.content_ideas.slice(0, 4).map((idea, i) => (
-                <div key={i} className="p-4 bg-background-secondary rounded-lg">
-                  <h4 className="font-medium">{idea.title}</h4>
-                  <p className="text-sm text-muted-foreground mt-1">{idea.description}</p>
-                  <p className="text-xs text-muted-foreground mt-2">
-                    Source: {idea.source_type} • Confidence: {Math.round((idea.confidence || 0.7) * 100)}%
-                  </p>
+                <div>
+                  <h2 className="text-2xl font-semibold">Your Next Video</h2>
+                  <p className="text-sm text-muted-foreground">Based on viewer requests</p>
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Comments Section */}
-        {storedComments.length > 0 && (
-          <div>
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-              <h2 className="text-xl font-bold">
-                Comments ({(analysisData.comments_analyzed || 0).toLocaleString()})
-              </h2>
-              <div className="flex gap-1 flex-wrap">
-                {filterOptions.map((option) => {
-                  // Calculate count for each filter
-                  let count = storedComments.length;
-                  if (option !== 'All') {
-                    const categoryMap: Record<string, string[]> = {
-                      'Questions': ['question'],
-                      'Praise': ['appreciation', 'praise'],
-                      'Complaints': ['complaint', 'criticism'],
-                      'Suggestions': ['suggestion', 'feedback'],
-                    };
-                    const acceptedCategories = categoryMap[option] || [];
-                    count = storedComments.filter((c) => 
-                      acceptedCategories.includes(c.category?.toLowerCase() || '')
-                    ).length;
-                  }
-                  
-                  return (
-                    <button
-                      key={option}
-                      onClick={() => setActiveFilter(option)}
-                      className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
-                        activeFilter === option
-                          ? 'bg-primary text-primary-foreground'
-                          : 'text-muted-foreground hover:bg-secondary'
-                      }`}
-                    >
-                      {option} {option !== 'All' && count > 0 && `(${count})`}
-                    </button>
-                  );
-                })}
               </div>
-            </div>
-
-            {filteredComments.length > 0 ? (
+              
               <div className="space-y-4">
-                {filteredComments.slice(0, 20).map((comment, index) => (
-                <motion.div
-                  key={comment.comment_id}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.02 }}
-                  className="p-4 bg-card border border-border rounded-xl"
-                >
-                  <div className="flex items-start gap-3">
-                    <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                      <span className="text-sm font-medium text-primary">
-                        {comment.author[0]?.toUpperCase() || '?'}
-                      </span>
+                {insights.content_ideas.slice(0, 4).map((idea, i) => (
+                  <div 
+                    key={i}
+                    className="flex gap-4 p-4 rounded-xl border border-border bg-background/50 hover:bg-background transition-colors"
+                  >
+                    <div className="flex-shrink-0">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center font-semibold text-sm ${
+                        i === 0 
+                          ? 'bg-primary text-primary-foreground' 
+                          : 'bg-muted text-muted-foreground'
+                      }`}>
+                        {i + 1}
+                      </div>
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-medium text-sm">{comment.author}</span>
-                        {comment.sentiment && (
-                          <span className={`text-xs px-2 py-0.5 rounded-full ${
-                            comment.sentiment === 'positive' ? 'bg-success/10 text-success' :
-                            comment.sentiment === 'negative' ? 'bg-destructive/10 text-destructive' :
-                            'bg-muted text-muted-foreground'
-                          }`}>
-                            {comment.sentiment}
-                          </span>
-                        )}
-                        {comment.category && (
-                          <span className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary">
-                            {comment.category}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-sm text-foreground mt-1">{comment.text}</p>
-                      <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
-                        <span>👍 {comment.like_count}</span>
-                        <span>💬 {comment.reply_count} replies</span>
-                      </div>
+                      <h3 className="font-semibold mb-1 leading-tight">{idea.title}</h3>
+                      <p className="text-sm text-muted-foreground line-clamp-2">{idea.description}</p>
                     </div>
                   </div>
-                </motion.div>
-              ))}
+                ))}
+              </div>
             </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center py-12 rounded-xl border-2 border-dashed border-border bg-card">
-                <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4">
-                  <MessageSquare className="w-8 h-8 text-muted-foreground" />
-                </div>
-                <h3 className="text-lg font-semibold mb-2">No {activeFilter.toLowerCase()} found</h3>
-                <p className="text-muted-foreground">
-                  Try selecting a different category
-                </p>
-              </div>
-            )}
+          )}
+        </motion.div>
 
-            {filteredComments.length > 20 && (
-              <div className="mt-8 text-center">
-                <p className="text-sm text-muted-foreground">
-                  Showing 20 of {filteredComments.length} comments
-                </p>
-              </div>
-            )}
+        {/* Category Breakdown & Topics */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+          className="grid md:grid-cols-2 gap-8"
+        >
+          <div>
+            <CategoryBreakdown categories={categories} />
           </div>
+          {topics.length > 0 && (
+            <div className="card-premium">
+              <h3 className="text-lg font-semibold mb-4">Key Discussion Topics</h3>
+              <TopicPills topics={topics} />
+            </div>
+          )}
+        </motion.div>
+
+        {/* Explore All Comments */}
+        {storedComments.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.4 }}
+          >
+            <h2 className="text-2xl font-semibold mb-6">Explore Comments</h2>
+            <CommentsExplorer comments={storedComments} />
+          </motion.div>
         )}
       </motion.div>
     </MainLayout>

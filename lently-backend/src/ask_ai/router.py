@@ -166,7 +166,11 @@ async def get_conversation(
             {
                 "role": m.role.value,
                 "content": m.content,
-                "timestamp": m.timestamp.isoformat()
+                "timestamp": m.timestamp.isoformat(),
+                # Include metadata for AI messages
+                **({"key_points": m.key_points} if m.key_points else {}),
+                **({"follow_up_questions": m.follow_up_questions} if m.follow_up_questions else {}),
+                **({"sources": m.sources} if m.sources else {})
             }
             for m in conversation.messages
         ],
@@ -270,6 +274,36 @@ async def get_question_suggestions(
             "questions_found": question_count,
             "suggestions_found": suggestion_count
         }
+    }
+
+
+@router.delete("/conversation/{conversation_id}")
+async def delete_conversation(
+    conversation_id: str,
+    user_data: dict = Depends(get_current_user_with_plan),
+    ask_ai: AskAIService = Depends(get_ask_ai_service)
+):
+    """
+    Delete a conversation
+    
+    Permanently deletes a conversation and its history.
+    """
+    user_id = user_data["uid"]
+    
+    success = await ask_ai.delete_conversation(
+        conversation_id=conversation_id,
+        user_id=user_id
+    )
+    
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found or you don't have permission to delete it"
+        )
+    
+    return {
+        "success": True,
+        "message": "Conversation deleted successfully"
     }
 
 

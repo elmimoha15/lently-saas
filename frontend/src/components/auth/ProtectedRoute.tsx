@@ -6,10 +6,9 @@
  * Redirects users who haven't completed onboarding to onboarding.
  */
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { Flame } from 'lucide-react';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -22,21 +21,35 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
 }) => {
   const { isAuthenticated, isLoading, user } = useAuth();
   const location = useLocation();
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    if (isLoading) {
+      setProgress(0);
+      const timer = setInterval(() => {
+        setProgress((prev) => {
+          if (prev >= 95) return 95;
+          return prev + 5;
+        });
+      }, 100);
+      return () => clearInterval(timer);
+    }
+  }, [isLoading]);
 
   // Show loading state with better UI
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="flex flex-col items-center gap-6">
-          <div className="relative">
-            <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center">
-              <Flame className="w-8 h-8 text-primary animate-pulse" />
-            </div>
-            <div className="absolute inset-0 w-16 h-16 border-4 border-primary border-t-transparent rounded-2xl animate-spin" />
+        <div className="w-full max-w-md px-4">
+          <div className="text-center mb-8">
+            <p className="text-lg font-medium text-foreground">Signing you in</p>
+            <p className="text-sm text-muted-foreground mt-1">Preparing your dashboard...</p>
           </div>
-          <div className="text-center">
-            <p className="text-lg font-medium text-foreground mb-1">Loading Lently</p>
-            <p className="text-sm text-muted-foreground">Preparing your dashboard...</p>
+          <div className="w-full h-1 bg-border/30 rounded-full overflow-hidden">
+            <div 
+              className="h-full bg-primary rounded-full transition-all duration-300 ease-out"
+              style={{ width: `${progress}%` }}
+            />
           </div>
         </div>
       </div>
@@ -69,21 +82,35 @@ interface PublicRouteProps {
 export const PublicRoute: React.FC<PublicRouteProps> = ({ children }) => {
   const { isAuthenticated, isLoading, user } = useAuth();
   const location = useLocation();
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    if (isLoading) {
+      setProgress(0);
+      const timer = setInterval(() => {
+        setProgress((prev) => {
+          if (prev >= 95) return 95;
+          return prev + 5;
+        });
+      }, 100);
+      return () => clearInterval(timer);
+    }
+  }, [isLoading]);
 
   // Show loading state with better UI
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="flex flex-col items-center gap-6">
-          <div className="relative">
-            <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center">
-              <Flame className="w-8 h-8 text-primary animate-pulse" />
-            </div>
-            <div className="absolute inset-0 w-16 h-16 border-4 border-primary border-t-transparent rounded-2xl animate-spin" />
+        <div className="w-full max-w-md px-4">
+          <div className="text-center mb-8">
+            <p className="text-lg font-medium text-foreground">Signing you in</p>
+            <p className="text-sm text-muted-foreground mt-1">Just a moment...</p>
           </div>
-          <div className="text-center">
-            <p className="text-lg font-medium text-foreground mb-1">Loading Lently</p>
-            <p className="text-sm text-muted-foreground">Just a moment...</p>
+          <div className="w-full h-1 bg-border/30 rounded-full overflow-hidden">
+            <div 
+              className="h-full bg-primary rounded-full transition-all duration-300 ease-out"
+              style={{ width: `${progress}%` }}
+            />
           </div>
         </div>
       </div>
@@ -119,21 +146,35 @@ interface OnboardingRouteProps {
 
 export const OnboardingRoute: React.FC<OnboardingRouteProps> = ({ children }) => {
   const { isAuthenticated, isLoading, user } = useAuth();
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    if (isLoading) {
+      setProgress(0);
+      const timer = setInterval(() => {
+        setProgress((prev) => {
+          if (prev >= 95) return 95;
+          return prev + 5;
+        });
+      }, 100);
+      return () => clearInterval(timer);
+    }
+  }, [isLoading]);
 
   // Show loading state with better UI
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="flex flex-col items-center gap-6">
-          <div className="relative">
-            <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center">
-              <Flame className="w-8 h-8 text-primary animate-pulse" />
-            </div>
-            <div className="absolute inset-0 w-16 h-16 border-4 border-primary border-t-transparent rounded-2xl animate-spin" />
+        <div className="w-full max-w-md px-4">
+          <div className="text-center mb-8">
+            <p className="text-lg font-medium text-foreground">Signing you in</p>
+            <p className="text-sm text-muted-foreground mt-1">Setting things up...</p>
           </div>
-          <div className="text-center">
-            <p className="text-lg font-medium text-foreground mb-1">Loading Lently</p>
-            <p className="text-sm text-muted-foreground">Setting things up...</p>
+          <div className="w-full h-1 bg-border/30 rounded-full overflow-hidden">
+            <div 
+              className="h-full bg-primary rounded-full transition-all duration-300 ease-out"
+              style={{ width: `${progress}%` }}
+            />
           </div>
         </div>
       </div>

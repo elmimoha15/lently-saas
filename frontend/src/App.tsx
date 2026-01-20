@@ -17,7 +17,6 @@ import Analyze from "./pages/Analyze";
 import Login from "./pages/Login";
 import Pricing from "./pages/Pricing";
 import Landing from "./pages/Landing";
-import SignIn from "./pages/SignIn";
 import SignUp from "./pages/SignUp";
 import Onboarding from "./pages/Onboarding";
 import NotFound from "./pages/NotFound";
@@ -42,7 +41,7 @@ const App = () => (
               path="/signin"
               element={
                 <PublicRoute>
-                  <SignIn />
+                  <Login />
                 </PublicRoute>
               }
             />
