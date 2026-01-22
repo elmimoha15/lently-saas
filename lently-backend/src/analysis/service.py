@@ -24,6 +24,7 @@ from src.analysis.schemas import (
     InsightsResult, KeyTheme, ContentIdea, AudienceInsight,
     ExecutiveSummary, VideoInfo, StoredComment
 )
+from src.utils.text_sanitizer import sanitize_ai_text, sanitize_priority_actions
 
 logger = logging.getLogger(__name__)
 
@@ -479,10 +480,14 @@ class AnalysisService:
         try:
             result = await self.gemini.generate_json(prompt)
             
+            # Sanitize AI output to remove broken formatting and fix common issues
+            raw_summary = result.get("executive_summary", "Analysis complete.")
+            raw_actions = result.get("priority_actions", [])
+            
             return ExecutiveSummary(
-                summary_text=result.get("executive_summary", "Analysis complete."),
+                summary_text=sanitize_ai_text(raw_summary),
                 key_metrics=result.get("key_metrics", {}),
-                priority_actions=result.get("priority_actions", [])
+                priority_actions=sanitize_priority_actions(raw_actions)
             )
             
         except GeminiError as e:

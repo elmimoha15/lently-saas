@@ -6,10 +6,12 @@ Gemini AI Configuration
 GEMINI_MODEL = "gemini-2.0-flash-lite"
 
 # Generation configuration
+# Low temperature (0.2) ensures consistent, deterministic outputs
+# This is critical for Hero Insight quality - users expect same results for same video
 GENERATION_CONFIG = {
-    "temperature": 0.7,  # Balanced creativity vs consistency
-    "top_p": 0.95,
-    "top_k": 40,
+    "temperature": 0.2,  # Low for consistent, reliable outputs across analyses
+    "top_p": 0.85,       # More focused token selection
+    "top_k": 20,         # Reduced randomness for consistency
     "max_output_tokens": 4096,
 }
 

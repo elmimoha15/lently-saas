@@ -164,33 +164,54 @@ Comments Analyzed: {analyzed_count}
 ## KEY THEMES
 {themes_json}
 
-## INSTRUCTIONS
-Write a 3-4 paragraph executive summary that:
-1. Opens with the overall reception (sentiment)
-2. Highlights what the audience loved and any concerns
-3. Identifies the top opportunities (content ideas, improvements)
-4. Ends with 2-3 specific action items
+## YOUR TASK
+Write a clear, professional executive summary for a YouTube creator. This is the HERO INSIGHT they see first, so it must be high quality.
 
-Be direct, specific, and actionable. Use actual numbers from the data.
+## STRUCTURE YOUR RESPONSE EXACTLY LIKE THIS:
 
-## FORMATTING RULES
-- Use [b]text[/b] to emphasize important words, numbers, or phrases (e.g., [b]48% positive sentiment[/b])
-- Do NOT use asterisks (**) or other markdown formatting
-- Emphasize key metrics, sentiments, and action items with [b] tags
-- Keep the text clean and professional
+**Paragraph 1 - Overall Reception (REQUIRED):**
+Start with a complete sentence: "The comment section for [video title] shows/reveals [overall sentiment]."
+Include the exact positive/negative sentiment percentages from the data.
+Mention dominant emotions viewers expressed.
+
+**Paragraph 2 - Key Findings (2-3 bullet points):**
+List specific findings with real numbers. Each point must be a COMPLETE sentence.
+Example format: "X% of viewers expressed Y about Z."
+DO NOT start sentences with conjunctions like "and", "but", "or".
+
+**Paragraph 3 - Opportunities:**
+What content opportunities exist based on viewer feedback?
+Be specific about what videos to create or improvements to make.
+
+**Paragraph 4 - Top Priority Action:**
+End with ONE clear, actionable recommendation the creator should do first.
+Include supporting data (e.g., "which had X mentions in comments").
+
+## FORMATTING RULES - CRITICAL:
+1. Write COMPLETE sentences only. Never start a sentence with "and", "or", "but".
+2. DO NOT use any formatting tags like [b], [/b], {{b}}, or asterisks. Write plain text only.
+3. Every number should include context (e.g., "73% positive" not just "73%").
+4. Use professional, clear language. No jargon or broken text.
+5. All sentences must be grammatically complete with subject and verb.
+
+## QUALITY CHECK BEFORE RESPONDING:
+- Does every sentence start with a capital letter and proper word (not "and")?
+- Are all sentences complete and grammatically correct?
+- Is there NO formatting markup in the text?
+- Are specific numbers included from the provided data?
 
 ## RESPONSE FORMAT (JSON)
 {{
-  "executive_summary": "Your 3-4 paragraph summary here with [b]emphasized text[/b]...",
+  "executive_summary": "Your 3-4 paragraph summary here in plain text without any formatting tags...",
   "key_metrics": {{
     "sentiment_score": 75,
     "engagement_quality": "high",
     "actionable_comments_percentage": 35
   }},
   "priority_actions": [
-    "Action 1",
-    "Action 2",
-    "Action 3"
+    "First priority action - be specific and actionable",
+    "Second priority action",
+    "Third priority action"
   ]
 }}
 
