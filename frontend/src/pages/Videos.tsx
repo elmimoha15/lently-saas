@@ -36,13 +36,16 @@ interface Video {
   topics: string[];
   isProcessing?: boolean;
   progress?: number;
+  videoId?: string;
 }
 
-const filterOptions = ['All', 'This Week', 'This Month', 'Positive', 'Negative'];
+const filterOptions = ['All', 'This Week', 'This Month'];
 
 const Videos = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState('All');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
   const { state: analysisState } = useAnalysis();
 
   // Fetch video history from API with periodic refetch for processing videos
@@ -98,6 +101,7 @@ const Videos = () => {
         topics: [],
         isProcessing: isProcessing,
         progress: isProcessing ? item.progress || 0 : undefined,
+        videoId: item.video_id,
       };
     });
   }, [historyData]);
@@ -122,6 +126,7 @@ const Videos = () => {
           categories: { questions: 0, praise: 0, complaints: 0, suggestions: 0, spam: 0, general: 0 },
           topics: [],
           isProcessing: true,
+          videoId: analysis.videoId,
           progress: analysis.progress,
         });
       }
@@ -158,16 +163,70 @@ const Videos = () => {
         monthAgo.setMonth(monthAgo.getMonth() - 1);
         result = result.filter((v) => new Date(v.analyzedAt) >= monthAgo);
         break;
-      case 'Positive':
-        result = result.filter((v) => v.sentiment.positive >= 70);
-        break;
-      case 'Negative':
-        result = result.filter((v) => v.sentiment.negative >= 20);
-        break;
     }
 
     return result;
   }, [searchQuery, activeFilter, allVideos]);
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, activeFilter]);
+
+  // Calculate pagination
+  const totalPages = Math.ceil(filteredVideos.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedVideos = filteredVideos.slice(startIndex, endIndex);
+
+  // Generate page numbers to display
+  const getPageNumbers = () => {
+    const pages: (number | string)[] = [];
+    const maxPagesToShow = 5;
+    
+    if (totalPages <= maxPagesToShow) {
+      // Show all pages if total is small
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i);
+      }
+    } else {
+      // Always show first page
+      pages.push(1);
+      
+      if (currentPage > 3) {
+        pages.push('...');
+      }
+      
+      // Show pages around current page
+      const start = Math.max(2, currentPage - 1);
+      const end = Math.min(totalPages - 1, currentPage + 1);
+      
+      for (let i = start; i <= end; i++) {
+        pages.push(i);
+      }
+      
+      if (currentPage < totalPages - 2) {
+        pages.push('...');
+      }
+      
+      // Always show last page
+      pages.push(totalPages);
+    }
+    
+    return pages;
+  };
+
+  const handlePreviousPage = () => {
+    setCurrentPage((prev) => Math.max(1, prev - 1));
+  };
+
+  const handleNextPage = () => {
+    setCurrentPage((prev) => Math.min(totalPages, prev + 1));
+  };
+
+  const handlePageClick = (page: number) => {
+    setCurrentPage(page);
+  };
 
   // Refetch when active analyses complete
   useEffect(() => {
@@ -228,37 +287,56 @@ const Videos = () => {
         {/* Video Table */}
         {isLoading ? (
           <VideoTableSkeleton />
-        ) : filteredVideos.length > 0 ? (
-          <VideoTable videos={filteredVideos} />
+        ) : paginatedVideos.length > 0 ? (
+          <VideoTable videos={paginatedVideos} />
         ) : (
           <EmptyState />
         )}
 
         {/* Pagination */}
-        {filteredVideos.length > 0 && (
-          <div className="flex justify-center gap-2 pt-4">
-            <button className="px-4 py-2 text-sm text-muted-foreground hover:text-primary transition-colors font-medium">
+        {!isLoading && filteredVideos.length > itemsPerPage && (
+          <div className="flex justify-center items-center gap-2 pt-4">
+            <button 
+              onClick={handlePreviousPage}
+              disabled={currentPage === 1}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                currentPage === 1
+                  ? 'text-muted-foreground/50 cursor-not-allowed'
+                  : 'text-muted-foreground hover:text-primary hover:bg-primary/5'
+              }`}
+            >
               Previous
             </button>
-            {[1, 2, 3].map((page) => (
-              <button
-                key={page}
-                className={`w-10 h-10 text-sm rounded-lg transition-all font-medium ${
-                  page === 1
-                    ? 'bg-primary text-primary-foreground shadow-sm'
-                    : 'text-muted-foreground hover:bg-primary/5 hover:text-primary'
-                }`}
-              >
-                {page}
-              </button>
+            
+            {getPageNumbers().map((page, index) => (
+              typeof page === 'number' ? (
+                <button
+                  key={page}
+                  onClick={() => handlePageClick(page)}
+                  className={`w-10 h-10 text-sm rounded-lg transition-all font-medium ${
+                    page === currentPage
+                      ? 'bg-primary text-primary-foreground shadow-sm'
+                      : 'text-muted-foreground hover:bg-primary/5 hover:text-primary'
+                  }`}
+                >
+                  {page}
+                </button>
+              ) : (
+                <span key={`ellipsis-${index}`} className="w-10 h-10 flex items-center justify-center text-muted-foreground">
+                  ...
+                </span>
+              )
             ))}
-            <span className="w-10 h-10 flex items-center justify-center text-muted-foreground">
-              ...
-            </span>
-            <button className="w-10 h-10 text-sm text-muted-foreground hover:bg-primary/5 hover:text-primary rounded-lg transition-all font-medium">
-              10
-            </button>
-            <button className="px-4 py-2 text-sm text-muted-foreground hover:text-primary transition-colors font-medium">
+            
+            <button 
+              onClick={handleNextPage}
+              disabled={currentPage === totalPages}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                currentPage === totalPages
+                  ? 'text-muted-foreground/50 cursor-not-allowed'
+                  : 'text-muted-foreground hover:text-primary hover:bg-primary/5'
+              }`}
+            >
               Next
             </button>
           </div>

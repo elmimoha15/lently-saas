@@ -1,19 +1,21 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Check, AlertCircle } from 'lucide-react';
+import { Check, AlertCircle, X, AlertTriangle } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Button } from '@/components/ui/button';
 import { useAnalysis } from '@/contexts/AnalysisContext';
 import { useQueryClient } from '@tanstack/react-query';
 import type { AnalysisStep } from '@/types/analysis';
+import { toast } from 'sonner';
+import { analysisApi } from '@/services/api.service';
 
 // Step labels for display
 const STEP_LABELS: Record<AnalysisStep, string> = {
   queued: 'Queued for processing',
   connecting: 'Connecting to YouTube',
   fetching_video: 'Fetching video metadata',
-  fetching_comments: 'Downloading comments',
+  fetching_comments: 'Finding best comments',
   analyzing_sentiment: 'AI analyzing sentiment',
   classifying: 'Categorizing comments',
   extracting_insights: 'Extracting insights',
@@ -48,25 +50,58 @@ const Analyze = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisId, setAnalysisId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showCancelModal, setShowCancelModal] = useState(false);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { videoId } = useParams<{ videoId?: string }>();
   
   const { startAnalysis, getAnalysis, state } = useAnalysis();
-    // If videoId is in URL params, try to find existing analysis for that video
+  
+  // Helper function to check if the param is a UUID (analysis ID) or YouTube video ID
+  const isUUID = (str: string) => {
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    return uuidRegex.test(str);
+  };
+  
+  // Handle URL param - could be analysis ID (UUID) or YouTube video ID
   useEffect(() => {
     if (videoId && !analysisId) {
-      // Find an active analysis for this video_id
-      const existingAnalysis = state.activeAnalyses.find(
-        a => a.videoId === videoId && a.step !== 'completed' && a.step !== 'failed'
-      );
-      
-      if (existingAnalysis) {
-        setAnalysisId(existingAnalysis.analysisId);
-        setIsAnalyzing(true);
+      // Check if this is an analysis ID (UUID) - clicking a processing video
+      if (isUUID(videoId)) {
+        // This is an analysis ID - find it and show progress
+        const analysis = getAnalysis(videoId);
+        if (analysis) {
+          setAnalysisId(videoId);
+          setIsAnalyzing(true);
+          // Optionally pre-fill the URL if we have it
+          if (analysis.videoUrl) {
+            setUrl(analysis.videoUrl);
+            setIsValid(true);
+          }
+        } else {
+          // Analysis not found, redirect to videos
+          navigate('/videos');
+        }
+      } else {
+        // This is a YouTube video ID - regenerate scenario or direct link
+        // Pre-fill the URL with the video ID (for regeneration - won't auto-start)
+        const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
+        setUrl(youtubeUrl);
+        setIsValid(true);
+        
+        // Check if there's an active analysis for this video_id
+        const activeAnalysesArray = Array.from(state.activeAnalyses.values());
+        const existingAnalysis = activeAnalysesArray.find(
+          a => a.videoId === videoId && a.step !== 'completed' && a.step !== 'failed'
+        );
+        
+        if (existingAnalysis) {
+          setAnalysisId(existingAnalysis.analysisId);
+          setIsAnalyzing(true);
+        }
       }
     }
-  }, [videoId, analysisId, state.activeAnalyses]);
+  }, [videoId, analysisId, state.activeAnalyses, getAnalysis, navigate]);
     // Get the current analysis from context
   const activeAnalysis = analysisId ? getAnalysis(analysisId) : undefined;
   
@@ -104,7 +139,8 @@ const Analyze = () => {
       let detail: string | undefined;
       if (step === 'fetching_comments' && activeAnalysis.commentsFetched !== undefined) {
         const total = activeAnalysis.totalComments || '...';
-        detail = `(${activeAnalysis.commentsFetched}/${total})`;
+        const fetched = activeAnalysis.commentsFetched;
+        detail = `${fetched} out of ${total} (${fetched}/${total})`;
       }
       
       return {
@@ -182,9 +218,36 @@ const Analyze = () => {
   };
 
   const handleCancel = () => {
-    setIsAnalyzing(false);
-    setAnalysisId(null);
-    setError(null);
+    setShowCancelModal(true);
+  };
+
+  const confirmCancel = async () => {
+    if (!analysisId) return;
+    
+    try {
+      // Call backend to cancel the analysis
+      await analysisApi.cancelAnalysis(analysisId);
+      
+      setIsAnalyzing(false);
+      setAnalysisId(null);
+      setError(null);
+      setShowCancelModal(false);
+      toast.info('Analysis canceled - video credit has been consumed');
+      navigate('/videos');
+    } catch (error) {
+      console.error('Failed to cancel analysis:', error);
+      // Still clean up frontend state even if backend call fails
+      setIsAnalyzing(false);
+      setAnalysisId(null);
+      setError(null);
+      setShowCancelModal(false);
+      toast.warning('Analysis stopped locally - video credit has been consumed');
+      navigate('/videos');
+    }
+  };
+
+  const cancelCancelation = () => {
+    setShowCancelModal(false);
   };
 
   const handleRetry = () => {
@@ -197,10 +260,11 @@ const Analyze = () => {
 
   return (
     <MainLayout>
-      <div className="max-w-4xl mx-auto px-6 py-12">
+      <div className="min-h-[calc(100vh-120px)] flex items-center justify-center px-6 py-12">
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
+          className="w-full max-w-2xl"
         >
           <AnimatePresence mode="wait">
             {!isAnalyzing ? (
@@ -216,7 +280,7 @@ const Analyze = () => {
                   Paste a YouTube video URL to analyze its comments
                 </p>
 
-                <div className="card-premium max-w-2xl mx-auto">
+                <div className="card-premium">
                   <div className="relative mb-5">
                     <input
                       type="url"
@@ -261,7 +325,7 @@ const Analyze = () => {
                 key="processing"
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="text-center max-w-2xl mx-auto"
+                className="text-center"
               >
                 {/* Video Info Header (if available) */}
                 {activeAnalysis?.videoTitle && (
@@ -387,11 +451,79 @@ const Analyze = () => {
                       View Results
                     </Button>
                   ) : (
-                    <p className="text-sm text-muted-foreground">
-                      You can navigate away - analysis will continue in the background
-                    </p>
+                    <div className="space-y-3">
+                      <p className="text-sm text-muted-foreground">
+                        You can navigate away - analysis will continue in the background
+                      </p>
+                      <Button 
+                        variant="destructive" 
+                        onClick={handleCancel}
+                        className="w-full"
+                      >
+                        <X className="w-4 h-4 mr-2" />
+                        Cancel Analysis
+                      </Button>
+                    </div>
                   )}
                 </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Cancel Confirmation Modal */}
+          <AnimatePresence>
+            {showCancelModal && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+                onClick={cancelCancelation}
+              >
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                  transition={{ type: 'spring', duration: 0.3 }}
+                  className="bg-card rounded-2xl border border-border shadow-2xl max-w-md w-full p-8"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-start gap-4 mb-6">
+                    <div className="w-12 h-12 rounded-full bg-warning/10 flex items-center justify-center flex-shrink-0">
+                      <AlertTriangle className="w-6 h-6 text-warning" />
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="text-xl font-semibold text-foreground mb-2">
+                        Cancel Analysis?
+                      </h3>
+                      <p className="text-muted-foreground text-sm leading-relaxed mb-3">
+                        Are you sure you want to cancel this analysis?
+                      </p>
+                      <div className="p-3 rounded-lg bg-warning/10 border border-warning/20">
+                        <p className="text-sm text-warning font-medium">
+                          ⚠️ Your video credit will still be consumed even if you cancel.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3">
+                    <Button
+                      variant="outline"
+                      onClick={cancelCancelation}
+                      className="flex-1 h-11 rounded-full"
+                    >
+                      Continue Analysis
+                    </Button>
+                    <Button
+                      onClick={confirmCancel}
+                      variant="destructive"
+                      className="flex-1 h-11 rounded-full"
+                    >
+                      Cancel Anyway
+                    </Button>
+                  </div>
+                </motion.div>
               </motion.div>
             )}
           </AnimatePresence>

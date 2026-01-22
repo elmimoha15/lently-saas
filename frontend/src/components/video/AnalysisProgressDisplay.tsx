@@ -54,7 +54,7 @@ export const AnalysisProgressDisplay = ({ analysis, stepLabels }: AnalysisProgre
         </div>
         {analysis.step === 'fetching_comments' && analysis.commentsFetched && (
           <p className="text-sm text-muted-foreground mt-2 ml-8">
-            Downloaded {analysis.commentsFetched} of {analysis.totalComments || '...'} comments
+            Finding {analysis.commentsFetched} out of {analysis.totalComments || '...'} best comments
           </p>
         )}
       </div>

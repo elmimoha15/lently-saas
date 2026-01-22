@@ -61,6 +61,7 @@ const Dashboard = () => {
       topics: [],
       isProcessing: isProcessing,
       progress: isProcessing ? item.progress || 0 : undefined,
+      videoId: item.video_id,
     };
   });
 
@@ -73,6 +74,9 @@ const Dashboard = () => {
       : 0,
     totalVideos: completedVideos.length,
   };
+
+  // Use actual completed videos count for the "Videos Analyzed" card
+  const videosAnalyzedCount = usage?.videos_used || completedVideos.length;
 
   // Get user's display name
   const displayName = user?.profile?.displayName?.split(' ')[0] || 'there';
@@ -131,7 +135,7 @@ const Dashboard = () => {
             <>
               <UsageCard
                 title="Videos Analyzed"
-                current={usage.videos_used}
+                current={videosAnalyzedCount}
                 limit={usage.videos_limit}
                 resetDate={usage.reset_date || undefined}
               />

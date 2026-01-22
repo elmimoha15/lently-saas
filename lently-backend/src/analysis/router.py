@@ -78,6 +78,15 @@ async def start_analysis(
             }
         )
     
+    # Enforce plan limit on max_comments
+    plan = billing.get_plan(user_plan)
+    plan_comment_limit = plan.comments_per_video
+    
+    # Use the minimum of requested comments and plan limit
+    effective_max_comments = min(request.max_comments, plan_comment_limit)
+    
+    logger.info(f"User {user_id} on {user_plan} plan - requested {request.max_comments} comments, enforcing {effective_max_comments} (plan limit: {plan_comment_limit})")
+    
     # Create a new analysis job
     analysis_id = str(uuid.uuid4())
     
@@ -91,7 +100,7 @@ async def start_analysis(
             await service.run_analysis(
                 job=job,
                 video_url=request.video_url_or_id,
-                max_comments=request.max_comments,
+                max_comments=effective_max_comments,
                 user_plan=user_plan,
                 include_sentiment=request.include_sentiment,
                 include_classification=request.include_classification,
@@ -284,6 +293,17 @@ async def analyze_video(
             }
         )
     
+    # Enforce plan limit on max_comments
+    billing = BillingService()
+    plan = billing.get_plan(user_plan)
+    plan_comment_limit = plan.comments_per_video
+    
+    # Use the minimum of requested comments and plan limit
+    effective_max_comments = min(request.max_comments, plan_comment_limit)
+    request.max_comments = effective_max_comments
+    
+    logger.info(f"User {user_id} on {user_plan} plan - enforcing {effective_max_comments} comments (plan limit: {plan_comment_limit})")
+    
     try:
         result = await analysis_service.analyze(
             request=request,
@@ -447,6 +467,7 @@ async def submit_async_analysis(
     from src.pubsub.publisher import JobPublisher
     
     user_id = user_data["uid"]
+    user_plan = user_data.get("plan", "free")
     
     # Check video quota using billing service
     billing = BillingService()
@@ -464,13 +485,22 @@ async def submit_async_analysis(
             }
         )
     
+    # Enforce plan limit on max_comments
+    plan = billing.get_plan(user_plan)
+    plan_comment_limit = plan.comments_per_video
+    
+    # Use the minimum of requested comments and plan limit
+    effective_max_comments = min(request.max_comments, plan_comment_limit)
+    
+    logger.info(f"User {user_id} on {user_plan} plan - enforcing {effective_max_comments} comments for async job (plan limit: {plan_comment_limit})")
+    
     # Publish job to Pub/Sub
     try:
         publisher = JobPublisher()
         job_id = await publisher.publish_analysis_job(
             user_id=user_id,
             video_id=request.video_url_or_id,
-            max_comments=request.max_comments,
+            max_comments=effective_max_comments,
             include_sentiment=request.include_sentiment,
             include_classification=request.include_classification,
             include_insights=request.include_insights,
@@ -578,6 +608,87 @@ async def cancel_job(
         )
 
 
+@router.post("/{analysis_id}/cancel")
+async def cancel_active_analysis(
+    analysis_id: str,
+    user_data: dict = Depends(get_current_user_with_plan)
+):
+    """
+    Cancel an active analysis that is currently processing.
+    
+    This marks the analysis as cancelled in the progress manager.
+    The analysis will stop at the next checkpoint.
+    """
+    user_id = user_data["uid"]
+    progress_manager = get_progress_manager()
+    
+    try:
+        # Get the job from progress manager
+        job = progress_manager.get_job(analysis_id)
+        
+        if not job:
+            # Try to cancel via pub/sub (if it's queued)
+            from src.pubsub.publisher import JobPublisher
+            publisher = JobPublisher()
+            cancelled = await publisher.cancel_job(analysis_id, user_id)
+            
+            if cancelled:
+                return {
+                    "analysis_id": analysis_id,
+                    "status": "cancelled",
+                    "message": "Queued job cancelled successfully"
+                }
+            
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Analysis not found or already completed"
+            )
+        
+        # Verify ownership
+        if job.user_id != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied"
+            )
+        
+        # Mark as failed/cancelled in progress manager
+        job.update_step(AnalysisStep.FAILED, error="Analysis cancelled by user")
+        
+        # Also delete from Firestore to clean up
+        try:
+            db = get_firestore()
+            
+            # Delete from global analyses collection
+            global_doc_ref = db.collection("analyses").document(analysis_id)
+            if global_doc_ref.get().exists:
+                global_doc_ref.delete()
+            
+            # Delete from user's analyses subcollection
+            user_doc_ref = db.collection("users") \
+                .document(user_id) \
+                .collection("analyses") \
+                .document(analysis_id)
+            if user_doc_ref.get().exists:
+                user_doc_ref.delete()
+        except Exception as cleanup_error:
+            logger.warning(f"Failed to clean up cancelled analysis: {cleanup_error}")
+        
+        return {
+            "analysis_id": analysis_id,
+            "status": "cancelled",
+            "message": "Active analysis cancelled successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to cancel analysis: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to cancel analysis: {str(e)}"
+        )
+
+
 @router.get("/{analysis_id}", response_model=AnalysisResponse)
 async def get_analysis(
     analysis_id: str,
@@ -652,3 +763,68 @@ async def get_analysis(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch analysis: {str(e)}"
         )
+
+
+@router.delete("/{analysis_id}")
+async def delete_analysis(
+    analysis_id: str,
+    user_data: dict = Depends(get_current_user_with_plan)
+):
+    """
+    Delete an analysis by ID
+    
+    Only allows deletion of analyses belonging to the authenticated user.
+    Deletes both the global analysis document and the user's summary document.
+    """
+    user_id = user_data["uid"]
+    
+    try:
+        db = get_firestore()
+
+        # First check if the analysis exists and belongs to the user
+        global_doc_ref = db.collection("analyses").document(analysis_id)
+        global_doc = global_doc_ref.get()
+        
+        if global_doc.exists:
+            analysis_data = global_doc.to_dict()
+            # Verify ownership
+            if analysis_data.get("user_id") != user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied"
+                )
+            
+            # Delete the global analysis document
+            global_doc_ref.delete()
+        
+        # Delete the user's summary document
+        user_doc_ref = db.collection("users") \
+            .document(user_id) \
+            .collection("analyses") \
+            .document(analysis_id)
+        
+        user_doc = user_doc_ref.get()
+        if user_doc.exists:
+            user_doc_ref.delete()
+        
+        # If neither document existed, return 404
+        if not global_doc.exists and not user_doc.exists:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Analysis not found"
+            )
+
+        return {
+            "success": True,
+            "message": "Analysis deleted successfully"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete analysis: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete analysis: {str(e)}"
+        )
+

@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { motion } from 'framer-motion';
-import { Link } from 'react-router-dom';
-import { RefreshCw, Trash2, ExternalLink, MoreHorizontal, Loader2 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Link, useNavigate } from 'react-router-dom';
+import { RefreshCw, Trash2, ExternalLink, MoreHorizontal, Loader2, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -10,6 +10,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
+import { analysisApi } from '@/services/api.service';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface Video {
   id: string;
@@ -36,6 +38,7 @@ interface Video {
   topics: string[];
   isProcessing?: boolean;
   progress?: number;
+  videoId?: string;
 }
 
 interface VideoTableProps {
@@ -45,24 +48,72 @@ interface VideoTableProps {
 
 export const VideoTable = ({ videos, compact = false }: VideoTableProps) => {
   const [regeneratingIds, setRegeneratingIds] = useState<Set<string>>(new Set());
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
+  const [videoToDelete, setVideoToDelete] = useState<Video | null>(null);
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const handleRegenerate = async (video: Video) => {
-    setRegeneratingIds(prev => new Set(prev).add(video.id));
-    
-    // Simulate regeneration
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    setRegeneratingIds(prev => {
-      const next = new Set(prev);
-      next.delete(video.id);
-      return next;
-    });
-    
-    toast.success(`Analysis regenerated for "${video.title}"`);
+    // Navigate to analyze page with video ID pre-filled
+    if (video.videoId) {
+      navigate(`/analyze/${video.videoId}`);
+    } else {
+      toast.error('Video ID not available for regeneration');
+    }
   };
 
-  const handleDelete = (video: Video) => {
-    toast.success(`"${video.title}" has been deleted`);
+  const handleDeleteClick = (video: Video) => {
+    setVideoToDelete(video);
+  };
+
+  const confirmDelete = async () => {
+    if (!videoToDelete) return;
+
+    setDeletingIds(prev => new Set(prev).add(videoToDelete.id));
+    
+    try {
+      const response = await analysisApi.deleteAnalysis(videoToDelete.id);
+      
+      if (response.error) {
+        throw new Error(response.error.detail);
+      }
+      
+      toast.success(`"${videoToDelete.title}" has been deleted`);
+      
+      // Update the query cache directly without refetching
+      queryClient.setQueryData(['analysisHistory'], (old: any) => {
+        if (!old) return old;
+        return {
+          ...old,
+          analyses: old.analyses.filter((a: any) => a.analysis_id !== videoToDelete.id),
+          count: old.count - 1
+        };
+      });
+      
+      queryClient.setQueryData(['recentVideos'], (old: any) => {
+        if (!old) return old;
+        return {
+          ...old,
+          analyses: old.analyses.filter((a: any) => a.analysis_id !== videoToDelete.id),
+          count: old.count - 1
+        };
+      });
+      
+      setVideoToDelete(null);
+    } catch (error) {
+      console.error('Delete error:', error);
+      toast.error(`Failed to delete video: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setDeletingIds(prev => {
+        const next = new Set(prev);
+        next.delete(videoToDelete.id);
+        return next;
+      });
+    }
+  };
+
+  const cancelDelete = () => {
+    setVideoToDelete(null);
   };
 
   const getSentimentColor = (positive: number) => {
@@ -212,7 +263,7 @@ export const VideoTable = ({ videos, compact = false }: VideoTableProps) => {
                       Analyzing...
                     </span>
                   ) : (
-                    <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex items-center justify-end gap-2">
                       <Button
                         variant="ghost"
                         size="sm"
@@ -238,18 +289,27 @@ export const VideoTable = ({ videos, compact = false }: VideoTableProps) => {
                         <DropdownMenuContent align="end" className="w-48">
                           <DropdownMenuItem
                             onClick={() => handleRegenerate(video)}
-                            disabled={regeneratingIds.has(video.id)}
                             className="cursor-pointer"
                           >
-                            <RefreshCw className={`w-4 h-4 mr-2 ${regeneratingIds.has(video.id) ? 'animate-spin' : ''}`} />
-                            {regeneratingIds.has(video.id) ? 'Regenerating...' : 'Regenerate Analysis'}
+                            <RefreshCw className="w-4 h-4 mr-2" />
+                            Regenerate Analysis
                           </DropdownMenuItem>
                           <DropdownMenuItem
-                            onClick={() => handleDelete(video)}
+                            onClick={() => handleDeleteClick(video)}
+                            disabled={deletingIds.has(video.id)}
                             className="cursor-pointer text-destructive focus:text-destructive focus:bg-destructive/10"
                           >
-                            <Trash2 className="w-4 h-4 mr-2" />
-                            Delete Video
+                            {deletingIds.has(video.id) ? (
+                              <>
+                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                Deleting...
+                              </>
+                            ) : (
+                              <>
+                                <Trash2 className="w-4 h-4 mr-2" />
+                                Delete Video
+                              </>
+                            )}
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -261,6 +321,67 @@ export const VideoTable = ({ videos, compact = false }: VideoTableProps) => {
           </tbody>
         </table>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      <AnimatePresence>
+        {videoToDelete && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+            onClick={cancelDelete}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ type: 'spring', duration: 0.3 }}
+              className="bg-card rounded-2xl border border-border shadow-2xl max-w-md w-full p-8"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start gap-4 mb-6">
+                <div className="w-12 h-12 rounded-full bg-destructive/10 flex items-center justify-center flex-shrink-0">
+                  <AlertTriangle className="w-6 h-6 text-destructive" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-xl font-semibold text-foreground mb-2">
+                    Delete Video Analysis?
+                  </h3>
+                  <p className="text-muted-foreground text-sm leading-relaxed">
+                    Are you sure you want to delete <span className="font-medium text-foreground">"{videoToDelete.title}"</span>? This action cannot be undone.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <Button
+                  variant="outline"
+                  onClick={cancelDelete}
+                  className="flex-1 h-11 rounded-full"
+                  disabled={deletingIds.has(videoToDelete.id)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={confirmDelete}
+                  disabled={deletingIds.has(videoToDelete.id)}
+                  className="flex-1 h-11 rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  {deletingIds.has(videoToDelete.id) ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Deleting...
+                    </>
+                  ) : (
+                    'Delete'
+                  )}
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

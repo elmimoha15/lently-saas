@@ -20,7 +20,7 @@ const STEP_LABELS: Record<AnalysisStep, string> = {
   queued: 'Queued for processing',
   connecting: 'Connecting to YouTube',
   fetching_video: 'Fetching video metadata',
-  fetching_comments: 'Downloading comments',
+  fetching_comments: 'Finding best comments',
   analyzing_sentiment: 'AI analyzing sentiment',
   classifying: 'Categorizing comments',
   extracting_insights: 'Extracting insights',
@@ -137,7 +137,7 @@ const VideoAnalysis = () => {
             </div>
             {activeAnalysis.step === 'fetching_comments' && activeAnalysis.commentsFetched && (
               <p className="text-sm text-muted-foreground mt-2 ml-8">
-                Downloaded {activeAnalysis.commentsFetched} of {activeAnalysis.totalComments || '...'} comments
+                Finding {activeAnalysis.commentsFetched} out of {activeAnalysis.totalComments || '...'} best comments
               </p>
             )}
           </div>

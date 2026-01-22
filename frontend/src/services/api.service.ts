@@ -229,6 +229,7 @@ export const userApi = {
 export const analysisApi = {
   /**
    * Start a new video analysis (returns immediately with analysis_id)
+   * Backend will enforce plan limits on max_comments
    */
   startAnalysis: (videoUrl: string, options?: {
     maxComments?: number;
@@ -238,7 +239,7 @@ export const analysisApi = {
     includeSummary?: boolean;
   }) => api.post<StartAnalysisResponse>('/api/analysis/start', {
     video_url_or_id: videoUrl,
-    max_comments: options?.maxComments || 500,
+    max_comments: options?.maxComments || 10000, // Request high number, backend enforces plan limit
     include_sentiment: options?.includeSentiment ?? true,
     include_classification: options?.includeClassification ?? true,
     include_insights: options?.includeInsights ?? true,
@@ -262,6 +263,18 @@ export const analysisApi = {
    */
   getHistory: (limit?: number) =>
     api.get<AnalysisHistoryResponse>(`/api/analysis/history${limit ? `?limit=${limit}` : ''}`),
+
+  /**
+   * Delete an analysis
+   */
+  deleteAnalysis: (analysisId: string) =>
+    api.delete<{ success: boolean; message: string }>(`/api/analysis/${analysisId}`),
+
+  /**
+   * Cancel an active or queued analysis
+   */
+  cancelAnalysis: (analysisId: string) =>
+    api.post<{ analysis_id: string; status: string; message: string }>(`/api/analysis/${analysisId}/cancel`, null),
 
   /**
    * Subscribe to analysis progress via SSE
