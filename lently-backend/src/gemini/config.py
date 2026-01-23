@@ -12,7 +12,7 @@ GENERATION_CONFIG = {
     "temperature": 0.2,  # Low for consistent, reliable outputs across analyses
     "top_p": 0.85,       # More focused token selection
     "top_k": 20,         # Reduced randomness for consistency
-    "max_output_tokens": 4096,
+    "max_output_tokens": 8192,  # Increased for batch processing
 }
 
 # More permissive settings for analyzing YouTube comments

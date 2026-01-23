@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { analysisApi, askAiApi } from '@/services/api.service';
 import { useBilling } from '@/contexts/BillingContext';
 import {
@@ -16,6 +16,7 @@ const AskAI = () => {
   const { videoId: routeVideoId } = useParams<{ videoId: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   
   // Get billing data from single source of truth
   const { usage, currentPlan, canAskQuestion, refreshBilling } = useBilling();
@@ -35,7 +36,7 @@ const AskAI = () => {
   const [conversationId, setConversationId] = useState<string | null>(loadConversationId);
   const [error, setError] = useState<string | null>(null);
   const [isLoadingConversation, setIsLoadingConversation] = useState(false);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -93,16 +94,16 @@ const AskAI = () => {
     plan: currentPlan?.name || 'Free',
   } : null;
 
-  // Fetch suggestions when video is selected
+  // Fetch suggestions when video is selected (only for initial view, not for 'all')
   const { data: suggestionsData } = useQuery({
     queryKey: ['askAiSuggestions', selectedVideoId],
     queryFn: async () => {
-      if (!selectedVideoId) return null;
+      if (!selectedVideoId || selectedVideoId === 'all') return null;
       const response = await askAiApi.getSuggestions(selectedVideoId);
       if (response.error) return null;
       return response.data;
     },
-    enabled: !!selectedVideoId,
+    enabled: !!selectedVideoId && selectedVideoId !== 'all' && !hasStartedChat,
   });
 
   // Default actionable suggestions - diverse question types
@@ -163,6 +164,7 @@ const AskAI = () => {
         setSelectedVideoId(data.video_id);
         setConversationId(convId);
         setHasStartedChat(true);
+        setIsInitialLoad(false);
       }
     } catch (err) {
       console.error('Failed to load conversation:', err);
@@ -172,10 +174,17 @@ const AskAI = () => {
     }
   };
 
-  const handleLoadConversation = async (convId: string, videoId: string) => {
-    setIsSidebarOpen(false);
-    await loadConversation(convId);
+  const handleLoadConversation = (convId: string, videoId: string) => {
+    // Immediately switch to chat view and navigate
+    setConversationId(convId);
+    setSelectedVideoId(videoId);
+    setHasStartedChat(true);
+    setIsLoadingConversation(true); // Show skeleton during load
+    setMessages([]); // Clear messages first for clean transition
     navigate(`/ai?conversation=${convId}`, { replace: true });
+    
+    // Load conversation data in background
+    loadConversation(convId);
   };
 
   // =========================================================================
@@ -237,21 +246,39 @@ const AskAI = () => {
     
     setError(null);
 
+    // Check if there's an existing conversation for this video that we should reuse
+    let existingConversationId = conversationId;
+    if (!existingConversationId && conversations.length > 0) {
+      const existingConv = conversations.find(c => c.video_id === selectedVideoId);
+      if (existingConv) {
+        // Load the existing conversation first
+        existingConversationId = existingConv.conversation_id;
+        setConversationId(existingConversationId);
+        
+        // Load the conversation messages if we haven't started chat yet
+        if (!hasStartedChat) {
+          await loadConversation(existingConversationId);
+        }
+      }
+    }
+
     // Start chat mode if not already
     if (!hasStartedChat) {
       setHasStartedChat(true);
-      // Add initial greeting
-      const greetingContent = isAllVideos 
-        ? `Hi! I've analyzed ${totalComments.toLocaleString()} comments across ${videoOptions.length} videos. What would you like to know?`
-        : `Hi! I've analyzed ${selectedVideo?.commentCount.toLocaleString() || 'the'} comments for "${selectedVideo?.title || 'this video'}". What would you like to know?`;
-      
-      const greeting: Message = {
-        id: 'greeting',
-        role: 'ai',
-        content: greetingContent,
-        timestamp: 'Just now',
-      };
-      setMessages([greeting]);
+      // Only add greeting if there's no existing conversation
+      if (!existingConversationId) {
+        const greetingContent = isAllVideos 
+          ? `Hi! I've analyzed ${totalComments.toLocaleString()} comments across ${videoOptions.length} videos. What would you like to know?`
+          : `Hi! I've analyzed ${selectedVideo?.commentCount.toLocaleString() || 'the'} comments for "${selectedVideo?.title || 'this video'}". What would you like to know?`;
+        
+        const greeting: Message = {
+          id: 'greeting',
+          role: 'ai',
+          content: greetingContent,
+          timestamp: 'Just now',
+        };
+        setMessages([greeting]);
+      }
     }
 
     // Add user message
@@ -264,7 +291,7 @@ const AskAI = () => {
     setMessages(prev => [...prev, userMessage]);
     setInput('');
 
-    // Ask the question
+    // Ask the question (use existing conversation ID if found)
     askMutation.mutate(messageText);
   };
 
@@ -290,28 +317,30 @@ const AskAI = () => {
     setHasStartedChat(false);
     setConversationId(null);
     setError(null);
-    setIsSidebarOpen(false);
     navigate('/ai', { replace: true });
   };
 
   const handleDeleteConversation = async (conversationIdToDelete: string) => {
-    try {
-      const response = await askAiApi.deleteConversation(conversationIdToDelete);
-      if (response.error) {
-        console.error('Failed to delete conversation:', response.error);
-        return;
-      }
-      
-      // If we deleted the current conversation, reset the chat
-      if (conversationIdToDelete === conversationId) {
-        handleNewConversation();
-      }
-      
-      // Refresh the conversations list
-      refetchConversations();
-    } catch (error) {
-      console.error('Error deleting conversation:', error);
+    // Optimistically remove from cache immediately
+    queryClient.setQueryData(['conversations'], (oldData: { conversations: Conversation[] } | null) => {
+      if (!oldData) return oldData;
+      return {
+        ...oldData,
+        conversations: oldData.conversations.filter(c => c.conversation_id !== conversationIdToDelete)
+      };
+    });
+    
+    // If we deleted the current conversation, reset the chat
+    if (conversationIdToDelete === conversationId) {
+      handleNewConversation();
     }
+    
+    // Delete in background (no await, fire and forget)
+    askAiApi.deleteConversation(conversationIdToDelete).catch(error => {
+      console.error('Failed to delete conversation:', error);
+      // Optionally refetch to restore if delete failed
+      refetchConversations();
+    });
   };
 
   // Scroll to bottom when messages change
@@ -339,9 +368,6 @@ const AskAI = () => {
   // =========================================================================
   
   const sidebarProps = {
-    isSidebarOpen,
-    onSidebarOpen: () => setIsSidebarOpen(true),
-    onSidebarClose: () => setIsSidebarOpen(false),
     conversations,
     videoMap,
     currentConversationId: conversationId,
@@ -361,6 +387,12 @@ const AskAI = () => {
     onVideoSelect: handleVideoSelect,
   };
   
+  const videoInfoProps = {
+    selectedVideo,
+    selectedVideoId,
+    videoOptions,
+  };
+  
   const inputProps = {
     input,
     onInputChange: setInput,
@@ -375,11 +407,7 @@ const AskAI = () => {
   // Render
   // =========================================================================
 
-  if (isLoadingConversation) {
-    return <LoadingView />;
-  }
-
-  if (!hasStartedChat) {
+  if (!hasStartedChat && !isLoadingConversation) {
     return (
       <InitialView
         {...sidebarProps}
@@ -394,12 +422,13 @@ const AskAI = () => {
   return (
     <ChatView
       {...sidebarProps}
-      {...videoSelectorProps}
+      {...videoInfoProps}
       {...inputProps}
       messages={messages}
       messagesEndRef={messagesEndRef}
       suggestions={suggestions}
       error={error}
+      isLoadingConversation={isLoadingConversation}
     />
   );
 };

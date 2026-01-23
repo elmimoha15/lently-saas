@@ -101,6 +101,17 @@ async def get_current_user_with_plan(
             return {**user_data, "uid": user.uid}
         
         user_data = user_doc.to_dict()
+        
+        # Also check billing subscription for plan (single source of truth)
+        sub_ref = db.collection("users").document(user.uid).collection("billing").document("subscription")
+        sub_doc = sub_ref.get()
+        if sub_doc.exists:
+            sub_data = sub_doc.to_dict()
+            billing_plan = sub_data.get("plan_id")
+            if billing_plan:
+                user_data["plan"] = billing_plan
+                logger.info(f"User {user.uid} plan from billing: {billing_plan}")
+        
         return {**user_data, "uid": user.uid}
         
     except Exception as e:

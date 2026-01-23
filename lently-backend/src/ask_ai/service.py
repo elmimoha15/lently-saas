@@ -417,6 +417,9 @@ class AskAIService:
         Returns:
             AI response with answer, sources, and follow-ups
         """
+        # Check if asking about all videos
+        is_all_videos = request.video_id == "all"
+        
         # Get or create conversation
         if request.conversation_id:
             conversation = await self._get_conversation(
@@ -432,7 +435,11 @@ class AskAIService:
             )
         
         # Get video analysis and comments
-        analysis_data = await self._get_analysis_data(request.video_id, user_id)
+        if is_all_videos:
+            analysis_data = await self._get_all_analyses_data(user_id)
+        else:
+            analysis_data = await self._get_analysis_data(request.video_id, user_id)
+        
         if not analysis_data:
             raise ValueError(
                 "No analysis found for this video. Please analyze the video first."
@@ -486,16 +493,38 @@ class AskAIService:
         answer = self._anonymize_usernames(answer)
         key_points = [self._anonymize_usernames(kp) for kp in key_points]
         
-        # Build source comments
+        # Build source comments - use AI's recommended sources
         sources = []
         source_ids = result.get("sources", [])
-        for comment in relevant_comments[:5]:  # Top 5 most relevant
-            if comment.get("id") in source_ids or len(sources) < 3:
+        
+        # Create a map of comment IDs to comments for quick lookup
+        comment_map = {c.get("id"): c for c in relevant_comments if c.get("id")}
+        
+        # First, try to use the specific sources the AI referenced
+        for source_id in source_ids:
+            if source_id in comment_map and len(sources) < 3:
+                comment = comment_map[source_id]
                 sources.append(SourceComment(
                     comment_id=comment.get("id", ""),
                     author=comment.get("author", "Unknown"),
                     text=comment.get("text", "")[:200],
-                    relevance="Directly related to your question"
+                    relevance="Referenced in the answer"
+                ))
+        
+        # If AI didn't provide enough sources, pick the most relevant from the top comments
+        if len(sources) < 2 and relevant_comments:
+            for comment in relevant_comments[:5]:
+                if len(sources) >= 3:
+                    break
+                comment_id = comment.get("id", "")
+                # Skip if already added
+                if any(s.comment_id == comment_id for s in sources):
+                    continue
+                sources.append(SourceComment(
+                    comment_id=comment_id,
+                    author=comment.get("author", "Unknown"),
+                    text=comment.get("text", "")[:200],
+                    relevance="Related to this topic"
                 ))
         
         # Prepare simplified sources for storage (no complex objects)
@@ -561,6 +590,121 @@ class AskAIService:
             
         except Exception as e:
             logger.error(f"Error fetching analysis: {e}")
+            return None
+    
+    async def _get_all_analyses_data(
+        self,
+        user_id: str
+    ) -> Optional[dict]:
+        """Get aggregated analysis data from all user's videos"""
+        try:
+            # Query for all user's analyses
+            analyses = (
+                self.db.collection("analyses")
+                .where("user_id", "==", user_id)
+                .order_by("created_at", direction="DESCENDING")
+                .stream()
+            )
+            
+            all_analyses = [doc.to_dict() for doc in analyses]
+            
+            if not all_analyses:
+                return None
+            
+            # Aggregate data from all analyses
+            total_comments = 0
+            total_analyzed = 0
+            all_comments = []
+            all_themes = []
+            video_titles = []
+            category_counts = {}
+            sentiment_totals = {"positive": 0, "negative": 0, "neutral": 0}
+            
+            for analysis in all_analyses:
+                video = analysis.get("video", {})
+                video_title = video.get("title", "Unknown")
+                video_id = video.get("video_id", "")
+                
+                if video_title not in video_titles:
+                    video_titles.append(video_title)
+                
+                total_comments += video.get("comment_count", 0)
+                total_analyzed += analysis.get("comments_analyzed", 0)
+                
+                # Aggregate sentiment
+                sentiment = analysis.get("sentiment", {})
+                if sentiment.get("summary"):
+                    s = sentiment["summary"]
+                    sentiment_totals["positive"] += s.get("positive_percentage", 0)
+                    sentiment_totals["negative"] += s.get("negative_percentage", 0)
+                    sentiment_totals["neutral"] += s.get("neutral_percentage", 0)
+                
+                # Aggregate categories
+                classification = analysis.get("classification", {})
+                if classification.get("summary"):
+                    counts = classification["summary"].get("category_counts", {})
+                    for cat, count in counts.items():
+                        category_counts[cat] = category_counts.get(cat, 0) + count
+                
+                # Aggregate themes
+                insights = analysis.get("insights", {})
+                if insights.get("key_themes"):
+                    for theme in insights["key_themes"][:3]:
+                        all_themes.append(theme.get("theme", ""))
+                
+                # Aggregate comments with video context
+                stored_comments = analysis.get("stored_comments", [])
+                for comment in stored_comments:
+                    comment["video_title"] = video_title
+                    comment["video_id"] = video_id
+                    all_comments.append(comment)
+            
+            # Calculate average sentiment
+            num_videos = len(video_titles)
+            avg_sentiment = {
+                "positive_percentage": sentiment_totals["positive"] / num_videos if num_videos > 0 else 0,
+                "negative_percentage": sentiment_totals["negative"] / num_videos if num_videos > 0 else 0,
+                "neutral_percentage": sentiment_totals["neutral"] / num_videos if num_videos > 0 else 0,
+            }
+            
+            # Determine dominant sentiment
+            if avg_sentiment["positive_percentage"] > avg_sentiment["negative_percentage"]:
+                avg_sentiment["dominant_sentiment"] = "positive"
+            elif avg_sentiment["negative_percentage"] > avg_sentiment["positive_percentage"]:
+                avg_sentiment["dominant_sentiment"] = "negative"
+            else:
+                avg_sentiment["dominant_sentiment"] = "neutral"
+            
+            # Get unique themes
+            unique_themes = list(dict.fromkeys(all_themes))[:5]
+            
+            # Build aggregated analysis structure
+            return {
+                "video": {
+                    "video_id": "all",
+                    "title": f"All Videos ({num_videos} videos)",
+                    "channel_title": video_titles[0].split(" - ")[0] if video_titles else "Your Channel",
+                    "comment_count": total_comments
+                },
+                "comments_analyzed": total_analyzed,
+                "sentiment": {
+                    "summary": avg_sentiment
+                },
+                "classification": {
+                    "summary": {
+                        "category_counts": category_counts
+                    }
+                },
+                "insights": {
+                    "key_themes": [{"theme": t} for t in unique_themes]
+                },
+                "stored_comments": all_comments,
+                "is_aggregated": True,
+                "video_titles": video_titles
+            }
+            
+        except Exception as e:
+            logger.error(f"Error fetching all analyses: {e}")
             return None
     
     async def _build_context(
@@ -794,7 +938,7 @@ class AskAIService:
         conversation_id: str,
         user_id: str
     ) -> Optional[ConversationHistory]:
-        """Get an existing conversation"""
+        """Get an existing conversation with full message metadata"""
         try:
             doc = self.db.collection("conversations").document(conversation_id).get()
             if not doc.exists:
@@ -806,15 +950,19 @@ class AskAIService:
             if data.get("user_id") != user_id:
                 return None
             
-            # Parse messages
-            messages = [
-                ConversationMessage(
+            # Parse messages with full metadata
+            messages = []
+            for m in data.get("messages", []):
+                msg = ConversationMessage(
                     role=MessageRole(m["role"]),
                     content=m["content"],
-                    timestamp=m.get("timestamp", datetime.utcnow())
+                    timestamp=m.get("timestamp", datetime.utcnow()),
+                    # Load metadata for AI messages
+                    key_points=m.get("key_points"),
+                    follow_up_questions=m.get("follow_up_questions"),
+                    sources=m.get("sources")
                 )
-                for m in data.get("messages", [])
-            ]
+                messages.append(msg)
             
             return ConversationHistory(
                 conversation_id=conversation_id,
@@ -850,7 +998,7 @@ class AskAIService:
         )
     
     async def _save_conversation(self, conversation: ConversationHistory):
-        """Save conversation to Firestore"""
+        """Save conversation to Firestore with full message metadata"""
         try:
             data = {
                 "conversation_id": conversation.conversation_id,
@@ -860,7 +1008,13 @@ class AskAIService:
                     {
                         "role": m.role.value,
                         "content": m.content,
-                        "timestamp": m.timestamp
+                        "timestamp": m.timestamp,
+                        # Include all metadata for AI messages
+                        **({
+                            "key_points": m.key_points,
+                            "follow_up_questions": m.follow_up_questions,
+                            "sources": m.sources
+                        } if m.role == MessageRole.ASSISTANT else {})
                     }
                     for m in conversation.messages
                 ],

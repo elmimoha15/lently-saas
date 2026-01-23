@@ -3,14 +3,11 @@ import { Sparkles } from 'lucide-react';
 import { AskAILayout } from './AskAILayout';
 import { ConversationSidebar, Conversation } from './ConversationSidebar';
 import { ChatInput } from './ChatInput';
-import { VideoSelector, VideoOption } from './VideoSelector';
+import { VideoInfoHeader, VideoOption } from './VideoInfoHeader';
 import { MessageBubble, Message } from './MessageBubble';
 
 interface ChatViewProps {
   // Sidebar props
-  isSidebarOpen: boolean;
-  onSidebarOpen: () => void;
-  onSidebarClose: () => void;
   conversations: Conversation[];
   videoMap: Map<string, { title: string; thumbnail: string }>;
   currentConversationId: string | null;
@@ -19,14 +16,10 @@ interface ChatViewProps {
   onDeleteConversation: (conversationId: string) => void;
   isLoadingConversations?: boolean;
   
-  // Video selector props
+  // Video info props
   selectedVideo: VideoOption | undefined;
   selectedVideoId: string;
   videoOptions: VideoOption[];
-  isVideoSelectorOpen: boolean;
-  isLoadingVideos: boolean;
-  onVideoSelectorToggle: () => void;
-  onVideoSelect: (id: string) => void;
   
   // Messages
   messages: Message[];
@@ -46,15 +39,15 @@ interface ChatViewProps {
   
   // Error
   error: string | null;
+  
+  // Loading state
+  isLoadingConversation?: boolean;
 }
 
 /**
  * Chat interface view when a conversation is active.
  */
 export const ChatView = ({
-  isSidebarOpen,
-  onSidebarOpen,
-  onSidebarClose,
   conversations,
   videoMap,
   currentConversationId,
@@ -65,10 +58,6 @@ export const ChatView = ({
   selectedVideo,
   selectedVideoId,
   videoOptions,
-  isVideoSelectorOpen,
-  isLoadingVideos,
-  onVideoSelectorToggle,
-  onVideoSelect,
   messages,
   messagesEndRef,
   input,
@@ -80,14 +69,12 @@ export const ChatView = ({
   quotaData,
   suggestions,
   error,
+  isLoadingConversation = false,
 }: ChatViewProps) => {
   return (
     <AskAILayout>
       {/* Conversation Sidebar */}
       <ConversationSidebar
-        isOpen={isSidebarOpen}
-        onOpen={onSidebarOpen}
-        onClose={onSidebarClose}
         conversations={conversations}
         videoMap={videoMap}
         currentConversationId={currentConversationId}
@@ -99,25 +86,47 @@ export const ChatView = ({
 
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Header with Video Selector */}
-        <div className="flex items-center justify-center gap-3 p-4 border-b border-border flex-shrink-0">
-          <div className="w-full max-w-3xl">
-            <VideoSelector
-              selectedVideo={selectedVideo}
-              selectedVideoId={selectedVideoId}
-              videoOptions={videoOptions}
-              isOpen={isVideoSelectorOpen}
-              isLoading={isLoadingVideos}
-              onToggle={onVideoSelectorToggle}
-              onSelect={onVideoSelect}
-              variant="compact"
-            />
-          </div>
-        </div>
+        {/* Header with Video Info */}
+        <VideoInfoHeader
+          selectedVideo={selectedVideo}
+          selectedVideoId={selectedVideoId}
+          videoOptions={videoOptions}
+        />
 
         {/* Messages Container - Centered */}
         <div className="flex-1 overflow-y-auto">
           <div className="max-w-3xl mx-auto p-4 space-y-6">
+          {isLoadingConversation ? (
+            // Skeleton messages for initial load
+            <div className="space-y-6">
+              {/* Skeleton AI message */}
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-full bg-muted animate-pulse flex-shrink-0" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-4 bg-muted rounded-lg w-3/4 animate-pulse" />
+                  <div className="h-4 bg-muted rounded-lg w-full animate-pulse" />
+                  <div className="h-4 bg-muted rounded-lg w-2/3 animate-pulse" />
+                </div>
+              </div>
+              {/* Skeleton user message */}
+              <div className="flex justify-end">
+                <div className="w-2/3 space-y-2">
+                  <div className="h-4 bg-muted rounded-lg w-full animate-pulse ml-auto" />
+                  <div className="h-4 bg-muted rounded-lg w-3/4 animate-pulse ml-auto" />
+                </div>
+              </div>
+              {/* Skeleton AI message */}
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-full bg-muted animate-pulse flex-shrink-0" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-4 bg-muted rounded-lg w-full animate-pulse" />
+                  <div className="h-4 bg-muted rounded-lg w-5/6 animate-pulse" />
+                  <div className="h-4 bg-muted rounded-lg w-3/4 animate-pulse" />
+                  <div className="h-4 bg-muted rounded-lg w-2/3 animate-pulse" />
+                </div>
+              </div>
+            </div>
+          ) : (
           <AnimatePresence mode="popLayout">
             {messages.map((message) => (
               <MessageBubble 
@@ -127,6 +136,7 @@ export const ChatView = ({
               />
             ))}
           </AnimatePresence>
+          )}
 
           {/* Suggested Questions (only show if just AI greeting) */}
           {messages.length === 1 && !isLoading && (
@@ -183,17 +193,27 @@ export const ChatView = ({
         {/* Input Area - Centered */}
         <div className="flex-shrink-0 border-t border-border">
           <div className="max-w-3xl mx-auto">
-            <ChatInput
-              value={input}
-              onChange={onInputChange}
-              onSend={() => onSend()}
-              onKeyDown={onKeyDown}
-              disabled={isLoading}
-              isLoading={isLoading}
-              inputRef={inputRef}
-              quotaData={quotaData}
-              variant="chat"
-            />
+            {isLoadingConversation ? (
+              // Skeleton for loading conversation
+              <div className="bg-background p-4">
+                <div className="relative">
+                  <div className="w-full h-[52px] bg-muted rounded-2xl animate-pulse" />
+                </div>
+                <div className="h-4 w-64 bg-muted rounded mt-2 mx-auto animate-pulse" />
+              </div>
+            ) : (
+              <ChatInput
+                value={input}
+                onChange={onInputChange}
+                onSend={() => onSend()}
+                onKeyDown={onKeyDown}
+                disabled={isLoading}
+                isLoading={isLoading}
+                inputRef={inputRef}
+                quotaData={quotaData}
+                variant="chat"
+              />
+            )}
           </div>
         </div>
       </div>

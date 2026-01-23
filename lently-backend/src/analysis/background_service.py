@@ -38,7 +38,9 @@ from google.cloud.firestore import SERVER_TIMESTAMP
 
 logger = logging.getLogger(__name__)
 
-BATCH_SIZE = 50
+# Larger batch = fewer API calls = faster processing
+# Gemini can handle ~150 comments per request effectively
+BATCH_SIZE = 75  # Balanced for speed and reliable JSON output
 
 
 class BackgroundAnalysisService:
@@ -136,6 +138,11 @@ class BackgroundAnalysisService:
             
             logger.info(f"[{job.analysis_id}] Fetched {len(comments)} comments")
             
+            # Check if cancelled
+            if job.is_cancelled():
+                logger.info(f"[{job.analysis_id}] Analysis cancelled by user")
+                return self._create_failed_response(job.analysis_id, created_at, "Analysis cancelled by user")
+            
             if len(comments) < 5:
                 job.update_step(AnalysisStep.FAILED, error="Not enough comments (minimum 5)")
                 return AnalysisResponse(
@@ -159,26 +166,53 @@ class BackgroundAnalysisService:
             insights_result = None
             summary_result = None
             
-            # Step 2: Sentiment Analysis
-            if include_sentiment:
-                job.update_step(AnalysisStep.ANALYZING_SENTIMENT)
-                logger.info(f"[{job.analysis_id}] Analyzing sentiment...")
-                sentiment_result = await self._analyze_sentiment(comments, video)
+            # Check if cancelled before AI processing
+            if job.is_cancelled():
+                logger.info(f"[{job.analysis_id}] Analysis cancelled by user")
+                return self._create_failed_response(job.analysis_id, created_at, "Analysis cancelled by user")
             
-            # Step 3: Classification
-            if include_classification:
-                job.update_step(AnalysisStep.CLASSIFYING)
-                logger.info(f"[{job.analysis_id}] Classifying comments...")
-                classification_result = await self._classify_comments(comments, video)
+            # Steps 2-3: Run Sentiment + Classification in PARALLEL for speed
+            job.update_step(AnalysisStep.ANALYZING_SENTIMENT)
+            logger.info(f"[{job.analysis_id}] Starting parallel sentiment + classification...")
+            
+            async def run_sentiment():
+                if include_sentiment:
+                    return await self._analyze_sentiment(comments, video)
+                return None
+            
+            async def run_classification():
+                if include_classification:
+                    return await self._classify_comments(comments, video)
+                return None
+            
+            # Run both in parallel
+            sentiment_result, classification_result = await asyncio.gather(
+                run_sentiment(),
+                run_classification()
+            )
+            
+            # Update progress after parallel processing
+            job.update_step(AnalysisStep.CLASSIFYING)
+            logger.info(f"[{job.analysis_id}] Sentiment + classification complete")
             
             # Step 4: Extract Insights
             if include_insights:
+                # Check if cancelled
+                if job.is_cancelled():
+                    logger.info(f"[{job.analysis_id}] Analysis cancelled by user")
+                    return self._create_failed_response(job.analysis_id, created_at, "Analysis cancelled by user")
+                
                 job.update_step(AnalysisStep.EXTRACTING_INSIGHTS)
                 logger.info(f"[{job.analysis_id}] Extracting insights...")
                 insights_result = await self._extract_insights(comments, video)
             
             # Step 5: Generate Summary
             if include_summary and sentiment_result and classification_result:
+                # Check if cancelled
+                if job.is_cancelled():
+                    logger.info(f"[{job.analysis_id}] Analysis cancelled by user")
+                    return self._create_failed_response(job.analysis_id, created_at, "Analysis cancelled by user")
+                
                 job.update_step(AnalysisStep.GENERATING_SUMMARY)
                 logger.info(f"[{job.analysis_id}] Generating summary...")
                 summary_result = await self._generate_summary(
@@ -333,44 +367,58 @@ class BackgroundAnalysisService:
     async def _analyze_sentiment(
         self, comments: list[Comment], video: VideoMetadata
     ) -> SentimentResult:
-        """Analyze sentiment of comments"""
+        """Analyze sentiment of comments with concurrent batch processing"""
         all_comment_sentiments = []
-        summary = None
         
-        for i in range(0, len(comments), BATCH_SIZE):
-            batch = comments[i:i + BATCH_SIZE]
-            
+        # Create batches
+        batches = [comments[i:i + BATCH_SIZE] for i in range(0, len(comments), BATCH_SIZE)]
+        
+        async def process_batch(batch: list[Comment], is_last: bool):
             prompt = SENTIMENT_ANALYSIS_PROMPT.format(
                 video_title=video.title,
                 channel_name=video.channel_title,
                 comments_json=self._prepare_comments_json(batch)
             )
-            
             try:
                 result = await self.gemini.generate_json(prompt)
-                
+                sentiments = []
                 for cs in result.get("comments", []):
-                    all_comment_sentiments.append(CommentSentiment(
+                    sentiments.append(CommentSentiment(
                         comment_id=cs["comment_id"],
                         sentiment=cs["sentiment"],
                         confidence=cs.get("confidence", 0.8),
                         emotion=cs.get("emotion")
                     ))
-                
-                if i + BATCH_SIZE >= len(comments):
-                    summary_data = result.get("summary", {})
-                    summary = SentimentSummary(
-                        positive_percentage=summary_data.get("positive_percentage", 0),
-                        negative_percentage=summary_data.get("negative_percentage", 0),
-                        neutral_percentage=summary_data.get("neutral_percentage", 0),
-                        mixed_percentage=summary_data.get("mixed_percentage", 0),
-                        dominant_sentiment=summary_data.get("dominant_sentiment", "neutral"),
-                        top_emotions=summary_data.get("top_emotions", []),
-                        sentiment_trend=summary_data.get("sentiment_trend")
-                    )
+                summary_data = result.get("summary") if is_last else None
+                return sentiments, summary_data
             except GeminiError as e:
                 logger.warning(f"Sentiment batch failed: {e}")
-                continue
+                return [], None
+        
+        # Process batches concurrently (max 3 concurrent to avoid rate limits)
+        results = []
+        for i in range(0, len(batches), 3):
+            chunk = batches[i:i+3]
+            chunk_results = await asyncio.gather(*[
+                process_batch(batch, i + j == len(batches) - 1) 
+                for j, batch in enumerate(chunk)
+            ])
+            results.extend(chunk_results)
+        
+        # Collect all results
+        summary = None
+        for sentiments, summary_data in results:
+            all_comment_sentiments.extend(sentiments)
+            if summary_data:
+                summary = SentimentSummary(
+                    positive_percentage=summary_data.get("positive_percentage", 0),
+                    negative_percentage=summary_data.get("negative_percentage", 0),
+                    neutral_percentage=summary_data.get("neutral_percentage", 0),
+                    mixed_percentage=summary_data.get("mixed_percentage", 0),
+                    dominant_sentiment=summary_data.get("dominant_sentiment", "neutral"),
+                    top_emotions=summary_data.get("top_emotions", []),
+                    sentiment_trend=summary_data.get("sentiment_trend")
+                )
         
         if summary is None:
             if all_comment_sentiments:
@@ -408,13 +456,15 @@ class BackgroundAnalysisService:
     async def _classify_comments(
         self, comments: list[Comment], video: VideoMetadata
     ) -> ClassificationResult:
-        """Classify comments into categories"""
+        """Classify comments into categories with concurrent batch processing"""
         all_classifications = []
         category_counts = {}
         
-        for i in range(0, len(comments), BATCH_SIZE):
-            batch = comments[i:i + BATCH_SIZE]
-            
+        # Prepare all batches
+        batches = [comments[i:i + BATCH_SIZE] for i in range(0, len(comments), BATCH_SIZE)]
+        
+        async def process_batch(batch: list[Comment]) -> list[CommentClassification]:
+            """Process a single batch and return classifications"""
             prompt = CLASSIFICATION_PROMPT.format(
                 video_title=video.title,
                 channel_name=video.channel_title,
@@ -423,6 +473,7 @@ class BackgroundAnalysisService:
             
             try:
                 result = await self.gemini.generate_json(prompt)
+                batch_classifications = []
                 
                 for cc in result.get("comments", []):
                     classification = CommentClassification(
@@ -431,13 +482,23 @@ class BackgroundAnalysisService:
                         secondary_category=cc.get("secondary_category"),
                         confidence=cc.get("confidence", 0.8)
                     )
-                    all_classifications.append(classification)
-                    
-                    cat = cc["primary_category"]
-                    category_counts[cat] = category_counts.get(cat, 0) + 1
+                    batch_classifications.append(classification)
+                
+                return batch_classifications
             except GeminiError as e:
                 logger.warning(f"Classification batch failed: {e}")
-                continue
+                return []
+        
+        # Process batches concurrently (max 3 concurrent to avoid rate limits)
+        for i in range(0, len(batches), 3):
+            chunk = batches[i:i+3]
+            chunk_results = await asyncio.gather(*[process_batch(batch) for batch in chunk])
+            
+            for batch_classifications in chunk_results:
+                for classification in batch_classifications:
+                    all_classifications.append(classification)
+                    cat = classification.primary_category
+                    category_counts[cat] = category_counts.get(cat, 0) + 1
         
         total = len(all_classifications) or 1
         category_percentages = {k: round(v / total * 100, 1) for k, v in category_counts.items()}
@@ -551,10 +612,12 @@ class BackgroundAnalysisService:
             # Sanitize AI output to remove broken formatting and fix common issues
             raw_summary = result.get("executive_summary", "Analysis complete.")
             raw_actions = result.get("priority_actions", [])
+            raw_findings = result.get("key_findings", [])
             
             return ExecutiveSummary(
                 summary_text=sanitize_ai_text(raw_summary),
                 key_metrics=result.get("key_metrics", {}),
+                key_findings=[sanitize_ai_text(f) for f in raw_findings if f],
                 priority_actions=sanitize_priority_actions(raw_actions)
             )
         except GeminiError as e:
@@ -562,6 +625,7 @@ class BackgroundAnalysisService:
             return ExecutiveSummary(
                 summary_text=f"Analyzed {comments_count} comments. Sentiment is {sentiment.summary.dominant_sentiment}.",
                 key_metrics={"comments_analyzed": comments_count},
+                key_findings=[],
                 priority_actions=[]
             )
 

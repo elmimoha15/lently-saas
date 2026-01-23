@@ -224,6 +224,20 @@ export const userApi = {
     plan: string;
     reset_date: string;
   }>('/api/user/quota'),
+
+  /**
+   * Update user profile
+   */
+  updateProfile: (data: { display_name?: string; photo_url?: string }) => 
+    api.put<{ message: string }>('/api/user/profile', {
+      displayName: data.display_name,
+      photoURL: data.photo_url,
+    }),
+
+  /**
+   * Delete user account and all associated data
+   */
+  deleteAccount: () => api.delete<{ message: string }>('/api/user/account'),
 };
 
 export const analysisApi = {
@@ -384,6 +398,10 @@ export const askAiApi = {
         role: 'user' | 'assistant' | 'system';
         content: string;
         timestamp: string;
+        // Metadata for AI messages
+        key_points?: string[];
+        follow_up_questions?: string[];
+        sources?: Array<{ author: string; text: string }>;
       }>;
       question_count: number;
       created_at: string;

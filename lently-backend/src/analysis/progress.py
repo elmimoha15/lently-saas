@@ -85,7 +85,7 @@ class AnalysisJob:
             AnalysisStep.QUEUED: "Queued",
             AnalysisStep.CONNECTING: "Connecting to YouTube",
             AnalysisStep.FETCHING_VIDEO: "Fetching video metadata",
-            AnalysisStep.FETCHING_COMMENTS: "Downloading comments",
+            AnalysisStep.FETCHING_COMMENTS: "Selecting quality comments",
             AnalysisStep.ANALYZING_SENTIMENT: "Analyzing sentiment",
             AnalysisStep.CLASSIFYING: "Categorizing comments",
             AnalysisStep.EXTRACTING_INSIGHTS: "Extracting insights",
@@ -174,6 +174,10 @@ class AnalysisJob:
     def get_current_update(self) -> ProgressUpdate:
         """Alias for get_progress for compatibility"""
         return self.get_progress()
+    
+    def is_cancelled(self) -> bool:
+        """Check if the job has been cancelled"""
+        return self.status == "failed" and self.step == AnalysisStep.FAILED
     
     def subscribe(self) -> asyncio.Queue:
         """Subscribe to progress updates"""

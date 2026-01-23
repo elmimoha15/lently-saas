@@ -165,53 +165,48 @@ Comments Analyzed: {analyzed_count}
 {themes_json}
 
 ## YOUR TASK
-Write a clear, professional executive summary for a YouTube creator. This is the HERO INSIGHT they see first, so it must be high quality.
+Write a clear, professional executive summary for a YouTube creator. This is the HERO INSIGHT they see first.
 
-## STRUCTURE YOUR RESPONSE EXACTLY LIKE THIS:
+## REQUIRED FORMAT (follow exactly):
 
-**Paragraph 1 - Overall Reception (REQUIRED):**
-Start with a complete sentence: "The comment section for [video title] shows/reveals [overall sentiment]."
-Include the exact positive/negative sentiment percentages from the data.
-Mention dominant emotions viewers expressed.
+1. **Opening Statement** (1 sentence):
+   Write: "The comment section for [video title] reveals a predominantly [positive/negative/mixed] sentiment, with [X]% of viewers expressing [positive/negative] opinions compared to [Y]% [positive/negative]."
+   Use the EXACT percentages from the sentiment data provided.
 
-**Paragraph 2 - Key Findings (2-3 bullet points):**
-List specific findings with real numbers. Each point must be a COMPLETE sentence.
-Example format: "X% of viewers expressed Y about Z."
-DO NOT start sentences with conjunctions like "and", "but", "or".
+2. **Key Findings** (2-3 complete bullet points):
+   Each bullet MUST be a complete sentence with a number.
+   Example: "45% of comments were questions, indicating high audience curiosity."
+   Example: "The top category was appreciation with 30 comments."
+   DO NOT write incomplete sentences like "75% of viewers expressing..."
 
-**Paragraph 3 - Opportunities:**
-What content opportunities exist based on viewer feedback?
-Be specific about what videos to create or improvements to make.
+3. **Top Priority** (1 sentence):
+   One specific, actionable recommendation with data to support it.
+   Example: "Address the 25 questions about installation to reduce viewer confusion."
 
-**Paragraph 4 - Top Priority Action:**
-End with ONE clear, actionable recommendation the creator should do first.
-Include supporting data (e.g., "which had X mentions in comments").
-
-## FORMATTING RULES - CRITICAL:
-1. Write COMPLETE sentences only. Never start a sentence with "and", "or", "but".
-2. DO NOT use any formatting tags like [b], [/b], {{b}}, or asterisks. Write plain text only.
-3. Every number should include context (e.g., "73% positive" not just "73%").
-4. Use professional, clear language. No jargon or broken text.
-5. All sentences must be grammatically complete with subject and verb.
-
-## QUALITY CHECK BEFORE RESPONDING:
-- Does every sentence start with a capital letter and proper word (not "and")?
-- Are all sentences complete and grammatically correct?
-- Is there NO formatting markup in the text?
-- Are specific numbers included from the provided data?
+## CRITICAL RULES:
+- Every sentence must be COMPLETE (subject + verb + object)
+- Include specific percentages and numbers from the data
+- NO formatting tags [b], **bold**, etc. - plain text only
+- DO NOT start sentences with "and", "or", "but"
+- The key_findings array must have 2-3 COMPLETE sentences
 
 ## RESPONSE FORMAT (JSON)
 {{
-  "executive_summary": "Your 3-4 paragraph summary here in plain text without any formatting tags...",
+  "executive_summary": "The comment section for [title] reveals... [full paragraph with key findings integrated]",
   "key_metrics": {{
-    "sentiment_score": 75,
-    "engagement_quality": "high",
-    "actionable_comments_percentage": 35
+    "sentiment_score": [positive_percentage as integer],
+    "engagement_quality": "high/medium/low",
+    "actionable_comments_percentage": [percentage of questions+suggestions+requests]
   }},
+  "key_findings": [
+    "First complete finding sentence with a number.",
+    "Second complete finding sentence with data.",
+    "Third complete finding (optional)."
+  ],
   "priority_actions": [
-    "First priority action - be specific and actionable",
-    "Second priority action",
-    "Third priority action"
+    "First specific action with supporting data",
+    "Second action",
+    "Third action"
   ]
 }}
 

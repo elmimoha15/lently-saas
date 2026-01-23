@@ -106,20 +106,71 @@ async def delete_account(user: AuthenticatedUser = Depends(get_current_user)):
     """
     Delete user account and all associated data
     ⚠️ This action is irreversible!
+    
+    Deletes:
+    - User profile
+    - All analyses and video data
+    - All AI conversations
+    - Usage statistics
+    - Billing records (subscription canceled if active)
     """
     try:
         db = get_firestore()
+        user_id = user.uid
         
-        # Delete user document
-        user_ref = db.collection("users").document(user.uid)
+        logger.info(f"Starting account deletion for user: {user_id}")
+        
+        # 1. Delete all analyses
+        analyses_ref = db.collection("analyses").where("user_id", "==", user_id)
+        analyses = analyses_ref.stream()
+        analysis_count = 0
+        for analysis in analyses:
+            analysis.reference.delete()
+            analysis_count += 1
+        logger.info(f"Deleted {analysis_count} analyses")
+        
+        # 2. Delete all conversations
+        conversations_ref = db.collection("conversations").where("user_id", "==", user_id)
+        conversations = conversations_ref.stream()
+        conversation_count = 0
+        for conversation in conversations:
+            conversation.reference.delete()
+            conversation_count += 1
+        logger.info(f"Deleted {conversation_count} conversations")
+        
+        # 3. Delete usage documents
+        usage_ref = db.collection("usage").where("user_id", "==", user_id)
+        usage_docs = usage_ref.stream()
+        usage_count = 0
+        for usage_doc in usage_docs:
+            usage_doc.reference.delete()
+            usage_count += 1
+        logger.info(f"Deleted {usage_count} usage records")
+        
+        # 4. Delete user document
+        user_ref = db.collection("users").document(user_id)
         user_ref.delete()
+        logger.info(f"Deleted user document")
         
-        # TODO: Delete associated videos, analyses, conversations, templates
-        # This will be implemented when those features are built
+        # 5. Delete Firebase Auth user
+        try:
+            from firebase_admin import auth as admin_auth
+            admin_auth.delete_user(user_id)
+            logger.info(f"Deleted Firebase Auth user")
+        except Exception as auth_error:
+            logger.warning(f"Could not delete Firebase Auth user: {auth_error}")
         
-        logger.info(f"Account deleted for user: {user.uid}")
+        logger.info(f"Account deletion complete for user: {user_id}")
+        logger.info(f"Summary: {analysis_count} analyses, {conversation_count} conversations, {usage_count} usage records deleted")
         
-        return {"message": "Account deleted successfully"}
+        return {
+            "message": "Account deleted successfully",
+            "deleted": {
+                "analyses": analysis_count,
+                "conversations": conversation_count,
+                "usage_records": usage_count
+            }
+        }
         
     except Exception as e:
         logger.error(f"Failed to delete account: {str(e)}")

@@ -49,6 +49,7 @@ interface VideoTableProps {
 export const VideoTable = ({ videos, compact = false }: VideoTableProps) => {
   const [regeneratingIds, setRegeneratingIds] = useState<Set<string>>(new Set());
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
+  const [cancellingIds, setCancellingIds] = useState<Set<string>>(new Set());
   const [videoToDelete, setVideoToDelete] = useState<Video | null>(null);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -59,6 +60,44 @@ export const VideoTable = ({ videos, compact = false }: VideoTableProps) => {
       navigate(`/analyze/${video.videoId}`);
     } else {
       toast.error('Video ID not available for regeneration');
+    }
+  };
+
+  const handleCancelAnalysis = async (video: Video) => {
+    setCancellingIds(prev => new Set(prev).add(video.id));
+    
+    try {
+      await analysisApi.cancelAnalysis(video.id);
+      
+      toast.success('Analysis cancelled');
+      
+      // Immediately remove from cache
+      queryClient.setQueryData(['analysisHistory'], (old: any) => {
+        if (!old) return old;
+        return {
+          ...old,
+          analyses: old.analyses.filter((a: any) => a.analysis_id !== video.id),
+          count: old.count - 1
+        };
+      });
+      
+      queryClient.setQueryData(['recentVideos'], (old: any) => {
+        if (!old) return old;
+        return {
+          ...old,
+          analyses: old.analyses.filter((a: any) => a.analysis_id !== video.id),
+          count: old.count - 1
+        };
+      });
+    } catch (error) {
+      console.error('Cancel error:', error);
+      toast.error('Failed to cancel analysis');
+    } finally {
+      setCancellingIds(prev => {
+        const next = new Set(prev);
+        next.delete(video.id);
+        return next;
+      });
     }
   };
 
@@ -259,9 +298,22 @@ export const VideoTable = ({ videos, compact = false }: VideoTableProps) => {
                 {/* Actions */}
                 <td className="py-4 px-6 text-right">
                   {video.isProcessing ? (
-                    <span className="text-xs text-muted-foreground">
-                      Analyzing...
-                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 px-3 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                      onClick={() => handleCancelAnalysis(video)}
+                      disabled={cancellingIds.has(video.id)}
+                    >
+                      {cancellingIds.has(video.id) ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                          Cancelling...
+                        </>
+                      ) : (
+                        'Cancel'
+                      )}
+                    </Button>
                   ) : (
                     <div className="flex items-center justify-end gap-2">
                       <Button

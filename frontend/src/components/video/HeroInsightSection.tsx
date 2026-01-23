@@ -13,6 +13,7 @@ import { motion } from 'framer-motion';
 
 interface ExecutiveSummary {
   summary_text: string;
+  key_findings?: string[];
   priority_actions?: string[];
 }
 
@@ -125,7 +126,6 @@ export const HeroInsightSection = ({
         
         {executiveSummary?.summary_text ? (
           <div className="prose prose-lg max-w-none">
-            {/* Parse and structure the summary text */}
             {(() => {
               // Sanitize the text first to remove any broken formatting
               const text = sanitizeText(executiveSummary.summary_text);
@@ -136,18 +136,10 @@ export const HeroInsightSection = ({
               // First sentence as main insight
               const mainInsight = sentences[0];
               
-              // Extract key metrics/numbers for bullet points
-              const metrics = text.match(/(\d+%[^.!?]*[.!?])/g) || [];
-              
-              // Split remaining text into logical sections
-              const sections = text.split(/\.\s+(?=[A-Z])/);
-              const opportunities = sections.filter(s => 
-                s.toLowerCase().includes('opportunity') || 
-                s.toLowerCase().includes('create') ||
-                s.toLowerCase().includes('develop')
-              );
-              
-              const actionItems = text.match(/\d+\)[^.]+\./g) || [];
+              // Use key_findings from API if available, otherwise extract from text
+              const keyFindings = executiveSummary.key_findings && executiveSummary.key_findings.length > 0
+                ? executiveSummary.key_findings
+                : text.match(/(\d+%[^.!?]*[.!?])/g) || [];
               
               return (
                 <div className="space-y-4">
@@ -156,52 +148,17 @@ export const HeroInsightSection = ({
                     {formatTextWithBold(mainInsight)}
                   </p>
                   
-                  {/* Key findings as bullets */}
-                  {metrics.length > 0 && (
+                  {/* Key findings as bullets - from API or parsed */}
+                  {keyFindings.length > 0 && (
                     <div className="space-y-2">
                       <p className="text-sm font-medium text-muted-foreground">Key Findings:</p>
                       <ul className="space-y-1.5 ml-0">
-                        {metrics.slice(0, 4).map((metric, i) => (
+                        {keyFindings.slice(0, 4).map((finding: string, i: number) => (
                           <li key={i} className="flex items-start gap-2 text-sm">
                             <span className="text-primary mt-1">•</span>
-                            <span>{metric.trim()}</span>
+                            <span>{typeof finding === 'string' ? sanitizeText(finding.trim()) : finding}</span>
                           </li>
                         ))}
-                      </ul>
-                    </div>
-                  )}
-                  
-                  {/* Opportunities */}
-                  {opportunities.length > 0 && (
-                    <div className="space-y-2">
-                      <p className="text-sm font-medium text-muted-foreground">Opportunities:</p>
-                      <ul className="space-y-1.5 ml-0">
-                        {opportunities.slice(0, 3).map((opp, i) => (
-                          <li key={i} className="flex items-start gap-2 text-sm">
-                            <Lightbulb className="w-4 h-4 text-primary flex-shrink-0 mt-0.5" />
-                            <span>{opp.trim()}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                  
-                  {/* Action items if present */}
-                  {actionItems.length > 0 && (
-                    <div className="space-y-2">
-                      <p className="text-sm font-medium text-muted-foreground">Action Items:</p>
-                      <ul className="space-y-1.5 ml-0">
-                        {actionItems.map((action, i) => {
-                          const cleanedAction = sanitizeText(action.replace(/^\d+\)\s*/, '').trim());
-                          // Skip empty or very short action items
-                          if (cleanedAction.length < 5) return null;
-                          return (
-                            <li key={i} className="flex items-start gap-2 text-sm">
-                              <span className="text-primary font-semibold mt-0.5">{i + 1})</span>
-                              <span>{cleanedAction}</span>
-                            </li>
-                          );
-                        })}
                       </ul>
                     </div>
                   )}

@@ -15,7 +15,7 @@ const STEP_LABELS: Record<AnalysisStep, string> = {
   queued: 'Queued for processing',
   connecting: 'Connecting to YouTube',
   fetching_video: 'Fetching video metadata',
-  fetching_comments: 'Finding best comments',
+  fetching_comments: 'Selecting quality comments',
   analyzing_sentiment: 'AI analyzing sentiment',
   classifying: 'Categorizing comments',
   extracting_insights: 'Extracting insights',
@@ -138,9 +138,10 @@ const Analyze = () => {
       // Add comment count detail for fetching_comments step
       let detail: string | undefined;
       if (step === 'fetching_comments' && activeAnalysis.commentsFetched !== undefined) {
-        const total = activeAnalysis.totalComments || '...';
+        const totalOnVideo = activeAnalysis.totalComments || 0;
         const fetched = activeAnalysis.commentsFetched;
-        detail = `${fetched} out of ${total} (${fetched}/${total})`;
+        // Show context: "100 quality comments (100/409)" - makes it clear we're selecting quality comments, not limited
+        detail = `${fetched} quality comments analyzed (${totalOnVideo.toLocaleString()} total available)`;
       }
       
       return {

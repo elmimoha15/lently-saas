@@ -112,6 +112,7 @@ class ExecutiveSummary(BaseModel):
     """Executive summary of analysis"""
     summary_text: str
     key_metrics: dict[str, str | int | float] = {}
+    key_findings: list[str] = []  # Complete sentence findings with data
     priority_actions: list[str] = []
 
 

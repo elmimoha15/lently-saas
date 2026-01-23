@@ -22,8 +22,9 @@ from src.youtube.exceptions import (
 )
 from src.youtube.constants import (
     MAX_COMMENTS_PER_REQUEST, SPAM_INDICATORS,
-    MAX_COMMENT_LENGTH, MIN_COMMENT_LENGTH, PLAN_COMMENT_LIMITS
+    MAX_COMMENT_LENGTH, MIN_COMMENT_LENGTH
 )
+from src.billing.schemas import get_plan
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -230,8 +231,9 @@ class YouTubeService:
         """
         video_id = self._extract_video_id(request.video_url_or_id)
         
-        # Get plan limit
-        max_allowed = PLAN_COMMENT_LIMITS.get(user_plan, 100)
+        # Get plan limit from billing schemas (single source of truth)
+        plan = get_plan(user_plan)
+        max_allowed = plan.comments_per_video
         max_to_fetch = min(request.max_comments, max_allowed)
         
         # Get video metadata first
@@ -242,7 +244,9 @@ class YouTubeService:
             next_page_token = None
             
             # Fetch more than needed to account for spam filtering
-            fetch_target = min(max_to_fetch * 2, max_allowed)
+            # For quality selection, we want to see 2-3x the target to pick the best ones
+            # But cap at a reasonable limit to avoid excessive API calls
+            fetch_target = min(max_to_fetch * 3, 5000)
             
             while len(raw_comments) < fetch_target:
                 response = self.youtube.commentThreads().list(

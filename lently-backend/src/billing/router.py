@@ -908,3 +908,65 @@ async def get_users_due_reset(admin_key: str):
             detail="Failed to get users"
         )
 
+
+@router.post("/admin/update-plan")
+async def admin_update_plan(
+    user_id: str = Body(...),
+    plan_id: str = Body(...),
+    admin_key: str = Body(...)
+):
+    """
+    Admin endpoint to manually update a user's plan (for testing).
+    
+    Usage: POST /api/billing/admin/update-plan
+    Body: {"user_id": "xxx", "plan_id": "starter", "admin_key": "xxx"}
+    """
+    from src.config import get_settings
+    settings = get_settings()
+    
+    expected_key = settings.jwt_secret_key[:16]
+    if admin_key != expected_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid admin key"
+        )
+    
+    try:
+        # Validate plan_id
+        if plan_id not in ["free", "starter", "pro", "business"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid plan_id: {plan_id}"
+            )
+        
+        plan_enum = PlanId(plan_id)
+        
+        # Update subscription
+        await billing_service.update_subscription(user_id, {
+            "plan_id": plan_enum,
+            "status": SubscriptionStatus.ACTIVE,
+            "updated_at": datetime.utcnow().isoformat()
+        })
+        
+        # Update limits
+        await billing_service.update_limits_for_plan(user_id, plan_enum)
+        
+        # Update main user document
+        db = get_firestore()
+        user_ref = db.collection("users").document(user_id)
+        user_ref.update({"plan": plan_id})
+        
+        return {
+            "success": True,
+            "message": f"Updated user {user_id} to {plan_id} plan",
+            "user_id": user_id,
+            "plan_id": plan_id
+        }
+        
+    except Exception as e:
+        logger.error(f"Error updating plan: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update plan: {str(e)}"
+        )
+

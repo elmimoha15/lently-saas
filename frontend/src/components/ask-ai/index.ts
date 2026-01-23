@@ -12,6 +12,8 @@ export { ChatInput } from './ChatInput';
 export { VideoSelector } from './VideoSelector';
 export type { VideoOption } from './VideoSelector';
 
+export { VideoInfoHeader } from './VideoInfoHeader';
+
 // Layout and views
 export { AskAILayout } from './AskAILayout';
 export { LoadingView } from './LoadingView';

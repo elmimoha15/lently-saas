@@ -20,7 +20,7 @@ const STEP_LABELS: Record<AnalysisStep, string> = {
   queued: 'Queued for processing',
   connecting: 'Connecting to YouTube',
   fetching_video: 'Fetching video metadata',
-  fetching_comments: 'Finding best comments',
+  fetching_comments: 'Selecting quality comments',
   analyzing_sentiment: 'AI analyzing sentiment',
   classifying: 'Categorizing comments',
   extracting_insights: 'Extracting insights',
@@ -259,9 +259,9 @@ const VideoAnalysis = () => {
               <div className="flex items-center gap-6 text-sm text-muted-foreground mb-8">
                 <span>{video.view_count.toLocaleString()} views</span>
                 <span>•</span>
-                <span>{video.comment_count.toLocaleString()} comments</span>
+                <span>{video.comment_count.toLocaleString()} total comments</span>
                 <span>•</span>
-                <span>{(analysisData.comments_analyzed || 0).toLocaleString()} analyzed</span>
+                <span>{(analysisData.comments_analyzed || 0).toLocaleString()} quality comments analyzed</span>
               </div>
 
               {/* Ask AI Button - Prominent */}

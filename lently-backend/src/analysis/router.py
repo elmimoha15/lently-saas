@@ -60,10 +60,13 @@ async def start_analysis(
     Returns immediately with an analysis_id that can be used to track progress.
     """
     user_id = user_data["uid"]
-    user_plan = user_data.get("plan", "free")
     
-    # Check video quota using billing service (single source of truth)
+    # Get plan from billing service (single source of truth)
     billing = BillingService()
+    subscription = await billing.get_user_subscription(user_id)
+    user_plan = subscription.plan_id.value  # Use billing subscription, not user doc
+    
+    # Check video quota using billing service
     quota_check = await billing.check_quota(user_id, UsageType.VIDEOS, 1)
     
     if not quota_check.allowed:
@@ -274,27 +277,28 @@ async def analyze_video(
     - Business: 100 videos/month
     """
     user_id = user_data["uid"]
-    user_plan = user_data.get("plan", "free")
     
-    # Check video quota
-    usage = user_data.get("usage", {})
-    videos_used = usage.get("videosAnalyzed", 0)
-    videos_limit = usage.get("videosLimit", 3)
+    # Get plan from billing service (single source of truth)
+    billing = BillingService()
+    subscription = await billing.get_user_subscription(user_id)
+    user_plan = subscription.plan_id.value
     
-    if videos_used >= videos_limit:
+    # Check video quota using billing service
+    quota_check = await billing.check_quota(user_id, UsageType.VIDEOS, 1)
+    
+    if not quota_check.allowed:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail={
                 "error": "quota_exceeded",
-                "message": f"You've used all {videos_limit} video analyses this month",
-                "current": videos_used,
-                "limit": videos_limit,
+                "message": f"You've used all {quota_check.limit} video analyses this month",
+                "current": quota_check.current,
+                "limit": quota_check.limit,
                 "action": "upgrade"
             }
         )
     
     # Enforce plan limit on max_comments
-    billing = BillingService()
     plan = billing.get_plan(user_plan)
     plan_comment_limit = plan.comments_per_video
     
@@ -467,10 +471,13 @@ async def submit_async_analysis(
     from src.pubsub.publisher import JobPublisher
     
     user_id = user_data["uid"]
-    user_plan = user_data.get("plan", "free")
+    
+    # Get plan from billing service (single source of truth)
+    billing = BillingService()
+    subscription = await billing.get_user_subscription(user_id)
+    user_plan = subscription.plan_id.value
     
     # Check video quota using billing service
-    billing = BillingService()
     quota_check = await billing.check_quota(user_id, UsageType.VIDEOS, 1)
     
     if not quota_check.allowed:

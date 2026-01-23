@@ -7,9 +7,6 @@ import { VideoSelector, VideoOption } from './VideoSelector';
 
 interface InitialViewProps {
   // Sidebar props
-  isSidebarOpen: boolean;
-  onSidebarOpen: () => void;
-  onSidebarClose: () => void;
   conversations: Conversation[];
   videoMap: Map<string, { title: string; thumbnail: string }>;
   currentConversationId: string | null;
@@ -48,9 +45,6 @@ interface InitialViewProps {
  * Shows the welcome message, video selector, and suggested questions.
  */
 export const InitialView = ({
-  isSidebarOpen,
-  onSidebarOpen,
-  onSidebarClose,
   conversations,
   videoMap,
   currentConversationId,
@@ -79,9 +73,6 @@ export const InitialView = ({
     <AskAILayout>
       {/* Conversation Sidebar */}
       <ConversationSidebar
-        isOpen={isSidebarOpen}
-        onOpen={onSidebarOpen}
-        onClose={onSidebarClose}
         conversations={conversations}
         videoMap={videoMap}
         currentConversationId={currentConversationId}
