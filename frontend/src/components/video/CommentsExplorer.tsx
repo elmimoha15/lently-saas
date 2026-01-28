@@ -30,12 +30,12 @@ export const CommentsExplorer = ({ comments }: CommentsExplorerProps) => {
   const filteredComments = (() => {
     if (activeFilter === 'All') return comments;
     
-    // Map filter names to backend category names
+    // Map filter names to backend category names (including legacy names for backward compatibility)
     const categoryMap: Record<string, string[]> = {
       'Questions': ['question'],
-      'Praise': ['appreciation', 'praise'],
+      'Praise': ['appreciation', 'praise', 'feedback'], // feedback can be positive
       'Complaints': ['complaint', 'criticism'],
-      'Suggestions': ['suggestion', 'feedback'],
+      'Suggestions': ['suggestion', 'request'],
     };
     
     const acceptedCategories = categoryMap[activeFilter] || [];
@@ -49,9 +49,9 @@ export const CommentsExplorer = ({ comments }: CommentsExplorerProps) => {
     if (filter === 'All') return comments.length;
     const categoryMap: Record<string, string[]> = {
       'Questions': ['question'],
-      'Praise': ['appreciation', 'praise'],
+      'Praise': ['appreciation', 'praise', 'feedback'], // feedback can be positive
       'Complaints': ['complaint', 'criticism'],
-      'Suggestions': ['suggestion', 'feedback'],
+      'Suggestions': ['suggestion', 'request'],
     };
     const acceptedCategories = categoryMap[filter] || [];
     return comments.filter((c) => 

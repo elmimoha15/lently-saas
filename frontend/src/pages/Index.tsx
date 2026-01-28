@@ -15,7 +15,7 @@ const Dashboard = () => {
   const { user } = useAuth();
   const { usage, isLoading: billingLoading, planName } = useBilling();
 
-  // Fetch recent videos from API with periodic refetch for processing videos
+  // Fetch recent videos from API - cached but polls if videos are processing
   const { data: historyData, isLoading: videosLoading } = useQuery({
     queryKey: ['recentVideos'],
     queryFn: async () => {
@@ -25,11 +25,11 @@ const Dashboard = () => {
       }
       return response.data;
     },
-    staleTime: 0,
-    refetchInterval: (data) => {
-      // If there are processing videos, poll every 2 seconds
+    // Use smart polling: only poll if there are processing videos
+    refetchInterval: (query) => {
+      const data = query.state.data;
       const hasProcessing = data?.analyses?.some((a: any) => a.status === 'processing');
-      return hasProcessing ? 2000 : 30000; // 2s if processing, otherwise 30s
+      return hasProcessing ? 2000 : false; // Poll every 2s only if processing, otherwise use cache
     },
   });
 
@@ -74,9 +74,6 @@ const Dashboard = () => {
       : 0,
     totalVideos: completedVideos.length,
   };
-
-  // Use actual completed videos count for the "Videos Analyzed" card
-  const videosAnalyzedCount = usage?.videos_used || completedVideos.length;
 
   // Get user's display name
   const displayName = user?.profile?.displayName?.split(' ')[0] || 'there';
@@ -135,7 +132,7 @@ const Dashboard = () => {
             <>
               <UsageCard
                 title="Videos Analyzed"
-                current={videosAnalyzedCount}
+                current={usage.videos_used}
                 limit={usage.videos_limit}
                 resetDate={usage.reset_date || undefined}
               />

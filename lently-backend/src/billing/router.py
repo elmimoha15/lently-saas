@@ -290,6 +290,126 @@ async def sync_subscription(
 
 
 # =============================================================================
+# Invoice PDF
+# =============================================================================
+
+@router.get("/transactions/{transaction_id}/invoice")
+async def get_invoice_pdf(
+    transaction_id: str,
+    disposition: str = "inline",
+    user: AuthenticatedUser = Depends(get_current_user)
+):
+    """
+    Get a PDF invoice URL for a transaction.
+    
+    Calls Paddle API to get a temporary URL for the invoice PDF.
+    The URL expires after 1 hour.
+    
+    Args:
+        transaction_id: Paddle transaction ID (e.g., txn_xxx)
+        disposition: 'inline' to open in browser, 'attachment' to download
+    
+    Returns:
+        URL to the invoice PDF
+    """
+    import httpx
+    from src.config import get_settings
+    
+    settings = get_settings()
+    
+    # Validate disposition
+    if disposition not in ["inline", "attachment"]:
+        disposition = "inline"
+    
+    try:
+        # First verify this transaction belongs to the user
+        db = get_firestore()
+        transactions_ref = (
+            db.collection("users")
+            .document(user.uid)
+            .collection("billing")
+            .document("transactions")
+            .collection("history")
+            .where("transaction_id", "==", transaction_id)
+            .limit(1)
+        )
+        
+        user_transactions = list(transactions_ref.stream())
+        if not user_transactions:
+            logger.warning(f"User {user.uid} attempted to access invoice for transaction {transaction_id} they don't own")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Transaction not found"
+            )
+        
+        # Call Paddle API to get invoice PDF URL
+        paddle_api_url = "https://sandbox-api.paddle.com" if settings.paddle_environment == "sandbox" else "https://api.paddle.com"
+        
+        # Ensure API key is clean (no whitespace)
+        api_key = settings.paddle_api_key.strip()
+        
+        logger.debug(f"Calling Paddle API: {paddle_api_url}/transactions/{transaction_id}/invoice")
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{paddle_api_url}/transactions/{transaction_id}/invoice",
+                params={"disposition": disposition},
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                }
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                pdf_url = data.get("data", {}).get("url")
+                if pdf_url:
+                    logger.info(f"Generated invoice PDF URL for transaction {transaction_id}")
+                    return {"url": pdf_url}
+                else:
+                    logger.error(f"Paddle response missing URL: {data}")
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Failed to get invoice URL from Paddle"
+                    )
+            elif response.status_code == 404:
+                logger.warning(f"Invoice not found for transaction {transaction_id}")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Invoice not available for this transaction. Invoices are only available for completed or billed transactions."
+                )
+            elif response.status_code == 403:
+                # Authentication error
+                logger.error(f"Paddle API authentication error: {response.text}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Paddle API authentication error. Please check API key configuration."
+                )
+            elif response.status_code == 422:
+                # Invoice not available (e.g., zero-value transaction)
+                logger.warning(f"Invoice not available for transaction {transaction_id}: {response.text}")
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Invoice not available for this transaction"
+                )
+            else:
+                logger.error(f"Paddle API error getting invoice: {response.status_code} - {response.text}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to get invoice from Paddle"
+                )
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching invoice PDF: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch invoice"
+        )
+
+
+# =============================================================================
 # Paddle Webhooks
 # =============================================================================
 
@@ -504,6 +624,11 @@ async def handle_subscription_created(data: dict, event_id: str):
     # Update usage limits for new plan
     await billing_service.update_limits_for_plan(user_id, plan_id)
     
+    # Reset usage for new subscription (fresh start)
+    if plan_id != PlanId.FREE:
+        logger.info(f"Resetting usage for new subscription (user {user_id}, plan {plan_id})")
+        await billing_service.reset_usage(user_id)
+    
     logger.info(f"User {user_id} subscribed to {plan_id}")
 
 
@@ -518,17 +643,25 @@ async def handle_subscription_updated(data: dict, event_id: str):
     if not user_id:
         return
     
+    # Get current plan before update
+    try:
+        current_subscription = await billing_service.get_user_subscription(user_id)
+        current_plan_id = current_subscription.plan_id
+    except Exception as e:
+        logger.warning(f"Could not get current plan for user {user_id}: {e}")
+        current_plan_id = PlanId.FREE
+    
     # Get new plan
     items = data.get("items", [])
     price_id = items[0].get("price", {}).get("id") if items else None
-    plan_id = await get_plan_from_price_id(price_id)
+    new_plan_id = await get_plan_from_price_id(price_id)
     
     # Check for scheduled changes
     scheduled_change = data.get("scheduled_change")
     
     subscription_data = {
         "paddle_price_id": price_id,
-        "plan_id": plan_id.value,
+        "plan_id": new_plan_id.value,
         "status": data.get("status"),
         "current_period_start": parse_paddle_date(data.get("current_billing_period", {}).get("starts_at")),
         "current_period_end": parse_paddle_date(data.get("current_billing_period", {}).get("ends_at")),
@@ -536,7 +669,12 @@ async def handle_subscription_updated(data: dict, event_id: str):
     }
     
     await billing_service.update_subscription(user_id, subscription_data)
-    await billing_service.update_limits_for_plan(user_id, plan_id)
+    await billing_service.update_limits_for_plan(user_id, new_plan_id)
+    
+    # Reset usage if upgrading to a new plan (not just status update)
+    if new_plan_id != current_plan_id:
+        logger.info(f"Plan changed from {current_plan_id} to {new_plan_id}, resetting usage for user {user_id}")
+        await billing_service.reset_usage(user_id)
 
 
 async def handle_subscription_activated(data: dict, event_id: str):
@@ -595,26 +733,45 @@ async def handle_subscription_resumed(data: dict, event_id: str):
 
 
 async def handle_subscription_canceled(data: dict, event_id: str):
-    """Handle subscription.canceled event"""
+    """
+    Handle subscription.canceled event.
+    This fires when the subscription period actually ends (cancel-at-period-end).
+    
+    Actions:
+    - Downgrade user to Free plan
+    - Update usage limits to Free plan
+    - Preserve existing usage history
+    """
     subscription_id = data.get("id")
     customer_id = data.get("customer_id")
     
-    logger.info(f"Subscription canceled: {subscription_id}")
+    logger.info(f"🔴 Subscription canceled webhook received: {subscription_id}")
+    logger.info(f"🔴 This subscription has reached its end date and is now being downgraded")
     
     user_id = await get_user_id_from_webhook_data(data)
     if not user_id:
+        logger.error(f"Could not find user for canceled subscription {subscription_id}")
         return
     
-    # Downgrade to free plan
+    logger.info(f"🔄 Downgrading user {user_id} to Free plan...")
+    
+    # Downgrade to free plan - subscription has ended
     await billing_service.update_subscription(user_id, {
         "status": SubscriptionStatus.CANCELED.value,
         "plan_id": PlanId.FREE.value,
         "paddle_subscription_id": None,
         "paddle_price_id": None,
+        "cancel_at_period_end": False,  # Clear the flag
     })
     
-    # Update limits to free plan
+    # Update limits to free plan but PRESERVE existing usage counts
+    # User keeps their usage history:
+    # - If they used 5 videos on Pro, they're now 5/1 (over limit, can't use more)
+    # - If they used 0 videos before canceling, they're now 0/1 (can use their free quota)
     await billing_service.update_limits_for_plan(user_id, PlanId.FREE)
+    
+    logger.info(f"✅ User {user_id} successfully downgraded to Free plan")
+    logger.info(f"✅ Usage limits updated, existing usage preserved")
 
 
 async def handle_transaction_completed(data: dict, event_id: str):

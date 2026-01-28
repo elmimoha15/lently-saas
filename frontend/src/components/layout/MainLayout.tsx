@@ -1,11 +1,15 @@
 import { ReactNode } from 'react';
 import { Sidebar } from './Sidebar';
+import { usePrefetch } from '@/hooks/usePrefetch';
 
 interface MainLayoutProps {
   children: ReactNode;
 }
 
 export const MainLayout = ({ children }: MainLayoutProps) => {
+  // Prefetch key data on first render for instant navigation
+  usePrefetch();
+  
   return (
     <div className="min-h-screen bg-background">
       <Sidebar />

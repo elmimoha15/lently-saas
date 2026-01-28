@@ -77,19 +77,22 @@ export const CurrentPlanSection = ({
       )}
 
       {/* Cancel at period end notice */}
-      {subscription?.cancel_at_period_end && (
-        <Alert className="mb-6">
-          <AlertCircle className="h-4 w-4" />
-          <AlertDescription>
-            Your subscription will end on{' '}
-            {subscription.current_period_end
-              ? new Date(subscription.current_period_end).toLocaleDateString('en-US', {
+      {subscription?.cancel_at_period_end && subscription.current_period_end && (
+        <Alert className="mb-6 border-amber-500/50 bg-amber-500/10">
+          <AlertCircle className="h-4 w-4 text-amber-500" />
+          <AlertDescription className="text-amber-900 dark:text-amber-100">
+            <div className="font-medium mb-1">Subscription Cancelled - Access Until Period End</div>
+            <div className="text-sm">
+              Your plan will remain active until{' '}
+              <strong>
+                {new Date(subscription.current_period_end).toLocaleDateString('en-US', {
                   month: 'long',
                   day: 'numeric',
                   year: 'numeric',
-                })
-              : 'the end of your billing period'}
-            . You'll be downgraded to the Free plan.
+                })}
+              </strong>
+              . You won't be charged again. After this date, you'll be downgraded to the Free plan.
+            </div>
           </AlertDescription>
         </Alert>
       )}

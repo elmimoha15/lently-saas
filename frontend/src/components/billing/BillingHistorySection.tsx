@@ -3,9 +3,11 @@
  * Displays transaction history with downloadable invoices
  */
 
-import { Loader2, Receipt, Download } from 'lucide-react';
+import { useState } from 'react';
+import { Loader2, Receipt, Download, FileText, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { TransactionData } from '@/services/api.service';
+import { TransactionData, billingApi } from '@/services/api.service';
+import { useToast } from '@/hooks/use-toast';
 
 interface BillingHistorySectionProps {
   transactions: TransactionData[];
@@ -47,6 +49,9 @@ export const BillingHistorySection = ({
 };
 
 const TransactionRow = ({ transaction }: { transaction: TransactionData }) => {
+  const [isLoadingPdf, setIsLoadingPdf] = useState(false);
+  const { toast } = useToast();
+
   const formatAmount = (amount: string, currency: string) => {
     const num = parseFloat(amount) / 100;
     return new Intl.NumberFormat('en-US', {
@@ -67,12 +72,50 @@ const TransactionRow = ({ transaction }: { transaction: TransactionData }) => {
     switch (status) {
       case 'completed':
         return 'bg-green-500/10 text-green-500';
+      case 'billed':
+        return 'bg-blue-500/10 text-blue-500';
       case 'pending':
         return 'bg-yellow-500/10 text-yellow-500';
       case 'failed':
         return 'bg-red-500/10 text-red-500';
       default:
         return 'bg-muted text-muted-foreground';
+    }
+  };
+
+  // Check if invoice should be available (completed or billed transactions)
+  const canHaveInvoice = transaction.status === 'completed' || transaction.status === 'billed';
+
+  const handleViewInvoice = async (mode: 'view' | 'download') => {
+    if (!transaction.id) return;
+    
+    setIsLoadingPdf(true);
+    try {
+      const disposition = mode === 'download' ? 'attachment' : 'inline';
+      const response = await billingApi.getInvoicePdf(transaction.id, disposition);
+      
+      if (response.error) {
+        toast({
+          title: 'Invoice unavailable',
+          description: response.error.detail || 'Could not retrieve invoice. Please try again later.',
+          variant: 'destructive',
+        });
+        return;
+      }
+      
+      if (response.data?.url) {
+        // Open the PDF URL in a new tab
+        window.open(response.data.url, '_blank', 'noopener,noreferrer');
+      }
+    } catch (error) {
+      console.error('Error fetching invoice:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to retrieve invoice. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoadingPdf(false);
     }
   };
 
@@ -111,18 +154,42 @@ const TransactionRow = ({ transaction }: { transaction: TransactionData }) => {
         </div>
       </div>
 
-      {transaction.invoice_pdf_url && (
-        <Button variant="outline" size="sm" asChild className="ml-4">
-          <a
-            href={transaction.invoice_pdf_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            download
+      {/* Invoice actions - only show for completed/billed transactions */}
+      {canHaveInvoice && (
+        <div className="flex items-center gap-2 ml-4">
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={() => handleViewInvoice('view')}
+            disabled={isLoadingPdf}
+            title="View invoice in browser"
           >
-            <Download className="w-4 h-4 mr-2" />
-            Download
-          </a>
-        </Button>
+            {isLoadingPdf ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <>
+                <FileText className="w-4 h-4 mr-2" />
+                View
+              </>
+            )}
+          </Button>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={() => handleViewInvoice('download')}
+            disabled={isLoadingPdf}
+            title="Download invoice as PDF"
+          >
+            {isLoadingPdf ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <>
+                <Download className="w-4 h-4 mr-2" />
+                Download
+              </>
+            )}
+          </Button>
+        </div>
       )}
     </div>
   );

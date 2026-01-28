@@ -317,7 +317,8 @@ async def analyze_video(
         
         # Increment usage in background
         if result.status == AnalysisStatus.COMPLETED:
-            background_tasks.add_task(_increment_usage, user_id)
+            comments_count = len(result.comments) if result.comments else 0
+            background_tasks.add_task(_increment_video_usage, user_id, comments_count)
         
         # Store analysis in Firestore for history
         background_tasks.add_task(
@@ -781,7 +782,9 @@ async def delete_analysis(
     Delete an analysis by ID
     
     Only allows deletion of analyses belonging to the authenticated user.
-    Deletes both the global analysis document and the user's summary document.
+    Deletes both the global analysis document, user's summary document, and all associated conversations.
+    
+    Note: This does NOT decrement usage counters. Usage reflects actual API usage, not current data.
     """
     user_id = user_data["uid"]
     
@@ -792,6 +795,7 @@ async def delete_analysis(
         global_doc_ref = db.collection("analyses").document(analysis_id)
         global_doc = global_doc_ref.get()
         
+        video_id = None
         if global_doc.exists:
             analysis_data = global_doc.to_dict()
             # Verify ownership
@@ -800,6 +804,8 @@ async def delete_analysis(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Access denied"
                 )
+            
+            video_id = analysis_data.get("video_id")
             
             # Delete the global analysis document
             global_doc_ref.delete()
@@ -814,6 +820,20 @@ async def delete_analysis(
         if user_doc.exists:
             user_doc_ref.delete()
         
+        # Delete all conversations associated with this video
+        if video_id:
+            conversations_ref = db.collection("conversations")
+            query = conversations_ref.where("video_id", "==", video_id).where("user_id", "==", user_id)
+            conversations = query.get()
+            
+            deleted_count = 0
+            for conv_doc in conversations:
+                conv_doc.reference.delete()
+                deleted_count += 1
+            
+            if deleted_count > 0:
+                logger.info(f"Deleted {deleted_count} conversation(s) associated with video {video_id}")
+        
         # If neither document existed, return 404
         if not global_doc.exists and not user_doc.exists:
             raise HTTPException(
@@ -823,7 +843,8 @@ async def delete_analysis(
 
         return {
             "success": True,
-            "message": "Analysis deleted successfully"
+            "message": "Analysis deleted successfully",
+            "conversations_deleted": deleted_count if video_id else 0
         }
 
     except HTTPException:

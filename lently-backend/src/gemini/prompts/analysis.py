@@ -2,7 +2,7 @@
 Analysis Prompts for Comment Processing
 """
 
-SENTIMENT_ANALYSIS_PROMPT = """Analyze the sentiment of these YouTube comments.
+SENTIMENT_ANALYSIS_PROMPT = """Analyze the sentiment of these YouTube comments with high accuracy.
 
 ## VIDEO CONTEXT
 Title: {video_title}
@@ -11,17 +11,41 @@ Channel: {channel_name}
 ## COMMENTS TO ANALYZE
 {comments_json}
 
-## INSTRUCTIONS
-For each comment, determine:
-1. **sentiment**: "positive", "negative", "neutral", or "mixed"
-2. **confidence**: 0.0-1.0 how confident you are
-3. **emotion**: The primary emotion (e.g., "excited", "frustrated", "curious", "grateful", "disappointed")
+## SENTIMENT CLASSIFICATION GUIDELINES
+Classify each comment's sentiment as:
 
-Also provide an overall summary with:
-- Percentage breakdown of sentiments
-- Dominant sentiment
-- Top 3 emotions expressed
-- Sentiment trend observation
+**POSITIVE** - The commenter expresses:
+- Gratitude, thanks, appreciation
+- Excitement, enthusiasm, happiness
+- Praise, compliments, admiration
+- Support, encouragement
+- Agreement, endorsement
+- Love for the content/creator
+
+**NEGATIVE** - The commenter expresses:
+- Frustration, anger, disappointment
+- Criticism, complaints
+- Disagreement, rejection
+- Sarcasm that's clearly negative
+- Demands or aggressive requests
+
+**NEUTRAL** - The commenter:
+- Asks questions without emotional charge
+- States facts objectively
+- Shares information without opinion
+- Makes observations without judgment
+
+**MIXED** - The comment contains BOTH:
+- Clear positive AND negative elements
+- Example: "Great video but the audio was terrible"
+
+## ACCURACY RULES
+1. Read the entire comment before deciding
+2. Consider context and tone, not just keywords
+3. Sarcasm should be detected and classified by true intent
+4. Emojis strongly indicate sentiment (😊=positive, 😠=negative)
+5. ALL CAPS often indicates strong emotion (usually frustration)
+6. Be precise - don't default to neutral if there's clear emotion
 
 ## RESPONSE FORMAT (JSON)
 {{
@@ -51,20 +75,26 @@ Channel: {channel_name}
 ## COMMENTS TO CLASSIFY
 {comments_json}
 
-## CATEGORIES
-- **question**: Asks something, wants to know more
-- **feedback**: Gives opinion on the content quality
-- **appreciation**: Thanks, praise, positive reaction
-- **criticism**: Negative feedback, complaints
-- **suggestion**: Ideas for future content
-- **request**: Asks creator to do something specific
-- **discussion**: Adds to the conversation, shares experience
-- **spam**: Promotional, off-topic, or bot-like
+## CATEGORIES (use these exact category names)
+- **question**: Asks something, wants information, expresses curiosity
+- **appreciation**: Thanks, praise, positive reaction, expressing love for content
+- **complaint**: Negative feedback, criticism, expressing disappointment or frustration
+- **suggestion**: Ideas for future content, recommendations, feature requests
+- **discussion**: Adds to the conversation, shares personal experience, general commentary
+- **spam**: Promotional content, off-topic, bot-like, self-promotion
 - **other**: Doesn't fit other categories
+
+## CLASSIFICATION GUIDELINES
+1. Be accurate - the category should match what the commenter is actually doing
+2. A negative comment expressing frustration = complaint
+3. A positive comment thanking the creator = appreciation
+4. Someone asking "how" or "what" or "why" = question
+5. "You should make a video about X" = suggestion
+6. Personal stories related to topic = discussion
 
 ## INSTRUCTIONS
 For each comment:
-1. Assign a primary_category
+1. Assign a primary_category (use exact names above)
 2. Optionally assign a secondary_category if relevant
 3. Rate your confidence 0.0-1.0
 
@@ -74,7 +104,7 @@ For each comment:
     {{"comment_id": "...", "primary_category": "question", "secondary_category": "suggestion", "confidence": 0.85}}
   ],
   "summary": {{
-    "category_counts": {{"question": 15, "appreciation": 20, ...}},
+    "category_counts": {{"question": 15, "appreciation": 20, "complaint": 5, "suggestion": 8, "discussion": 10, "spam": 2, "other": 3}},
     "category_percentages": {{"question": 15.0, "appreciation": 20.0, ...}},
     "top_category": "appreciation",
     "actionable_count": 25
@@ -86,7 +116,7 @@ Respond ONLY with valid JSON, no additional text."""
 
 INSIGHTS_PROMPT = """Extract actionable insights from these YouTube comments.
 
-## VIDEO CONTEXT
+## VIDEO CONTEXT (CRITICAL - ALL INSIGHTS MUST RELATE TO THIS)
 Title: {video_title}
 Channel: {channel_name}
 Description: {video_description}
@@ -94,20 +124,35 @@ Description: {video_description}
 ## COMMENTS DATA
 {comments_json}
 
+## CRITICAL RULES
+1. **ALL content ideas MUST be directly related to the video's topic** (shown above)
+2. DO NOT suggest unrelated video topics - stay within the video's domain
+3. Base suggestions ONLY on what viewers explicitly request or ask about in comments
+4. If a video is about "habits", suggest habit-related content only
+5. If a video is about "coding", suggest coding-related content only
+6. If comments don't contain clear requests, extract themes from the video topic itself
+
 ## EXTRACT THE FOLLOWING
 
 ### 1. KEY THEMES (3-5)
-What topics/themes come up repeatedly? Include:
-- Theme name
+What topics/themes from the video come up repeatedly in comments? Include:
+- Theme name (must relate to the video's topic)
 - How many comments mention it
 - Overall sentiment toward this theme
 - 2-3 example comments
 
-### 2. CONTENT IDEAS (3-5)
-Based on questions, requests, and discussions, what videos should the creator make?
-- Specific video title idea
-- Why this would work (based on comment evidence)
+### 2. CONTENT IDEAS (3-5) - MUST BE RELATED TO VIDEO TOPIC
+Based on questions, requests, and discussions, what FOLLOW-UP videos should the creator make?
+**IMPORTANT**: Each idea must be a logical continuation or expansion of the video's main topic.
+- For a video about "habits" → suggest more habit/productivity content
+- For a video about "cooking" → suggest more cooking/recipe content
+- NEVER suggest completely unrelated topics like "coding" for a "habits" video
+
+For each idea include:
+- Specific video title idea (related to the original video's domain)
+- Why this would work (based on comment evidence - quote actual comments)
 - Confidence level
+- The specific comments that requested or inspired this idea
 
 ### 3. AUDIENCE INSIGHTS (3-5)
 What do these comments reveal about the audience?

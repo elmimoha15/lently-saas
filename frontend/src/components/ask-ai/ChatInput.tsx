@@ -1,5 +1,5 @@
 import { ArrowUp, Loader2, AlertTriangle } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { useUpgradeModal } from '@/hooks/useUpgradeModal';
 
 interface ChatInputProps {
   value: string;
@@ -30,10 +30,21 @@ export const ChatInput = ({
   quotaData,
   variant = 'chat',
 }: ChatInputProps) => {
+  const { showUpgradeModal } = useUpgradeModal();
+  
   // Check if unlimited (Business plan with very high limit)
   const isUnlimited = quotaData && quotaData.questions_limit >= 999999;
   const isQuotaExhausted = quotaData && !isUnlimited && quotaData.questions_used >= quotaData.questions_limit;
   const canSend = value.trim() && !disabled && !isLoading && !isQuotaExhausted;
+  
+  const handleUpgradeClick = () => {
+    showUpgradeModal({
+      limitType: 'ai_questions',
+      currentUsage: quotaData?.questions_used || 0,
+      currentLimit: quotaData?.questions_limit || 0,
+      message: 'You\'ve used all your AI questions for this month.',
+    });
+  };
 
   return (
     <div className={variant === 'chat' ? 'bg-background p-4' : 'bg-transparent'}>
@@ -42,9 +53,12 @@ export const ChatInput = ({
         <div className="flex items-center justify-center gap-2 mb-3 p-3 rounded-xl bg-destructive/10 text-destructive text-sm">
           <AlertTriangle className="w-4 h-4" />
           <span>You've used all your AI questions this month.</span>
-          <Link to="/settings/billing" className="font-medium underline hover:no-underline">
+          <button 
+            onClick={handleUpgradeClick}
+            className="font-medium underline hover:no-underline"
+          >
             Upgrade now
-          </Link>
+          </button>
         </div>
       )}
       

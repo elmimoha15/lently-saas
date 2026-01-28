@@ -116,7 +116,7 @@ class BillingService:
     async def get_user_usage(self, user_id: str) -> Usage:
         """
         Get user's current usage from Firestore.
-        Creates default usage record if none exists.
+        AUTO-SYNCS video count from analyses collection if counter is 0.
         """
         try:
             db = get_firestore()
@@ -132,13 +132,29 @@ class BillingService:
                             pass
                         elif isinstance(data[field], str):
                             data[field] = datetime.fromisoformat(data[field].replace('Z', '+00:00'))
-                return Usage(**data)
+                
+                usage = Usage(**data)
+                
+                # AUTO-SYNC: If videos_analyzed is 0 but user has videos, sync it
+                if usage.videos_analyzed == 0:
+                    actual_count = await self._count_user_videos(user_id)
+                    if actual_count > 0:
+                        logger.info(f"🔄 Auto-syncing videos for user {user_id}: {actual_count} videos found")
+                        from google.cloud.firestore import Increment
+                        usage_ref.update({"videos_analyzed": Increment(actual_count)})
+                        usage.videos_analyzed = actual_count
+                
+                return usage
             
             # No usage record - create default based on free plan
             plan = PLANS[PlanId.FREE]
             now = datetime.utcnow()
+            
+            # Check actual video count
+            actual_count = await self._count_user_videos(user_id)
+            
             usage = Usage(
-                videos_analyzed=0,
+                videos_analyzed=actual_count,  # Use actual count
                 comments_analyzed=0,
                 ai_questions_used=0,
                 videos_limit=plan.videos_per_month,
@@ -147,6 +163,9 @@ class BillingService:
                 period_start=now,
                 period_end=now + timedelta(days=30)
             )
+            
+            if actual_count > 0:
+                logger.info(f"📊 New usage record for user {user_id} with {actual_count} existing videos")
             
             # Save default usage
             usage_ref.set(self._usage_to_dict(usage))
@@ -160,6 +179,24 @@ class BillingService:
                 comments_limit=plan.comments_per_video,
                 ai_questions_limit=plan.ai_questions_per_month
             )
+    
+    async def _count_user_videos(self, user_id: str) -> int:
+        """
+        Fast count of actual videos in user's analyses collection.
+        This is the centralized source of truth for video count.
+        """
+        try:
+            db = get_firestore()
+            analyses_ref = db.collection("users").document(user_id).collection("analyses")
+            
+            # Fast count - only fetches document IDs, not full documents
+            docs = analyses_ref.stream()
+            count = sum(1 for _ in docs)
+            
+            return count
+        except Exception as e:
+            logger.error(f"Error counting videos for user {user_id}: {e}")
+            return 0
     
     async def get_billing_info(self, user_id: str, email: str) -> BillingInfo:
         """
@@ -345,12 +382,28 @@ class BillingService:
         """
         Update usage limits when plan changes.
         Called on upgrade/downgrade.
+        
+        IMPORTANT: This updates LIMITS only, NOT usage counts.
+        Existing usage (videos_analyzed, ai_questions_used) is preserved.
+        
+        Example scenarios:
+        - User upgrades from Free (used 0/1 videos) to Pro:
+          -> Sets limit to 20, keeps usage at 0 -> Result: 0/20 videos
+        - User downgrades from Pro (used 5/20 videos) to Free:
+          -> Sets limit to 1, keeps usage at 5 -> Result: 5/1 videos (over limit)
+        - User downgrades from Pro (used 0/20 videos) to Free:
+          -> Sets limit to 1, keeps usage at 0 -> Result: 0/1 videos (can use free quota)
         """
         try:
             plan = self.get_plan(plan_id)
             usage = await self.get_user_usage(user_id)
             
-            # Update limits but keep current usage counts
+            # Log current state before update
+            logger.info(f"Updating limits for user {user_id} from plan to {plan_id.value}:")
+            logger.info(f"  Current usage: {usage.videos_analyzed}/{usage.videos_limit} videos, "
+                       f"{usage.ai_questions_used}/{usage.ai_questions_limit} AI questions")
+            
+            # Update limits but keep current usage counts (PRESERVE USAGE)
             usage.videos_limit = plan.videos_per_month
             usage.comments_limit = plan.comments_per_video
             usage.ai_questions_limit = plan.ai_questions_per_month
@@ -363,7 +416,12 @@ class BillingService:
                 "ai_questions_limit": usage.ai_questions_limit,
             })
             
-            logger.info(f"Updated limits for user {user_id} to plan {plan_id}")
+            # Log new state after update
+            logger.info(f"  New limits: {usage.videos_analyzed}/{usage.videos_limit} videos, "
+                       f"{usage.ai_questions_used}/{usage.ai_questions_limit} AI questions")
+            logger.info(f"  Usage counts preserved: videos_analyzed={usage.videos_analyzed}, "
+                       f"ai_questions_used={usage.ai_questions_used}")
+            
             return usage
             
         except Exception as e:
@@ -407,37 +465,71 @@ class BillingService:
     async def cancel_subscription(self, user_id: str, at_period_end: bool = True) -> Subscription:
         """
         Cancel user's subscription.
-        By default, cancels at end of billing period.
+        
+        Default behavior (at_period_end=True):
+        - Sets subscription to cancel at end of billing period
+        - User keeps full access until period ends
+        - Auto-renew is turned off
+        - Downgrade happens when Paddle webhook fires at period end
+        
+        Immediate cancellation (at_period_end=False):
+        - Cancels and downgrades immediately (for admin/support use)
         """
         subscription = await self.get_user_subscription(user_id)
         
         if not subscription.paddle_subscription_id:
             raise ValueError("No active subscription to cancel")
         
-        # Call Paddle API to cancel
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.PADDLE_API_URL}/subscriptions/{subscription.paddle_subscription_id}/cancel",
-                headers={
-                    "Authorization": f"Bearer {settings.paddle_api_key}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "effective_from": "next_billing_period" if at_period_end else "immediately"
-                }
-            )
-            
-            if response.status_code not in [200, 202]:
-                logger.error(f"Paddle cancel failed: {response.text}")
-                raise ValueError(f"Failed to cancel subscription: {response.text}")
+        # Call Paddle API to cancel (skip for sandbox/test subscriptions)
+        # In sandbox, we just update local state without calling Paddle
+        should_call_paddle = (
+            settings.paddle_environment == "production" and 
+            subscription.paddle_subscription_id and
+            not subscription.paddle_subscription_id.startswith("sub_test_")
+        )
         
-        # Update local subscription
-        if at_period_end:
-            subscription.cancel_at_period_end = True
+        if should_call_paddle:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.PADDLE_API_URL}/subscriptions/{subscription.paddle_subscription_id}/cancel",
+                    headers={
+                        "Authorization": f"Bearer {settings.paddle_api_key}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "effective_from": "next_billing_period" if at_period_end else "immediately"
+                    }
+                )
+                
+                if response.status_code not in [200, 202]:
+                    logger.error(f"Paddle cancel failed: {response.text}")
+                    raise ValueError(f"Failed to cancel subscription: {response.text}")
         else:
-            subscription.status = SubscriptionStatus.CANCELED
+            logger.info(f"Skipping Paddle API call for sandbox/test subscription: {subscription.paddle_subscription_id}")
         
-        return await self.update_subscription(user_id, subscription.dict())
+        # Update local subscription state
+        if at_period_end:
+            # CANCEL AT PERIOD END - Keep access until billing period ends
+            subscription.cancel_at_period_end = True
+            subscription.status = SubscriptionStatus.ACTIVE  # Still active!
+            await self.update_subscription(user_id, subscription.dict())
+            
+            logger.info(f"User {user_id} subscription will cancel at period end: {subscription.current_period_end}")
+            logger.info(f"User retains {subscription.plan_id} plan access until: {subscription.current_period_end}")
+        else:
+            # IMMEDIATE CANCELLATION - Downgrade now (admin/support only)
+            subscription.status = SubscriptionStatus.CANCELED
+            subscription.plan_id = PlanId.FREE.value
+            subscription.paddle_subscription_id = None
+            subscription.paddle_price_id = None
+            await self.update_subscription(user_id, subscription.dict())
+            
+            # Update limits to Free plan but preserve existing usage
+            await self.update_limits_for_plan(user_id, PlanId.FREE)
+            
+            logger.info(f"User {user_id} immediately cancelled and downgraded to Free plan")
+        
+        return await self.get_user_subscription(user_id)
     
     # ==========================================================================
     # Webhook Signature Verification

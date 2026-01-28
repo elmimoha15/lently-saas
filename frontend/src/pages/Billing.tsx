@@ -12,9 +12,10 @@
 
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { AlertCircle, Loader2, CreditCard, ExternalLink } from 'lucide-react';
+import { AlertCircle, Loader2 } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useBilling } from '@/contexts/BillingContext';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useQuery } from '@tanstack/react-query';
@@ -87,6 +88,8 @@ const Billing = () => {
       const success = await cancelSubscription();
       if (success) {
         setShowCancelDialog(false);
+        // Refresh billing data to show cancellation status
+        await refreshBilling();
       }
     } finally {
       setIsCancelling(false);
@@ -99,14 +102,85 @@ const Billing = () => {
     plansSection?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  // Loading state
+  // Loading state with skeletons
   if (isLoading) {
     return (
       <MainLayout>
-        <div className="flex items-center justify-center min-h-[60vh]">
-          <div className="text-center">
-            <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-4" />
-            <p className="text-muted-foreground">Loading billing information...</p>
+        <div className="space-y-10">
+          <Skeleton className="h-9 w-72" />
+
+          {/* Current Plan Skeleton */}
+          <div className="card-elevated space-y-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Skeleton className="h-7 w-32" />
+                <Skeleton className="h-7 w-20 rounded-full" />
+                <Skeleton className="h-6 w-16 rounded" />
+              </div>
+              <Skeleton className="h-6 w-20" />
+            </div>
+            <div className="space-y-2">
+              <Skeleton className="h-5 w-48" />
+              <Skeleton className="h-5 w-56" />
+              <Skeleton className="h-5 w-52" />
+            </div>
+            <div className="flex gap-4">
+              <Skeleton className="h-10 w-32" />
+              <Skeleton className="h-10 w-40" />
+            </div>
+          </div>
+
+          {/* Usage Statistics Skeleton */}
+          <div className="space-y-6">
+            <Skeleton className="h-7 w-40" />
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="card-premium space-y-4">
+                  <div className="flex items-center gap-3">
+                    <Skeleton className="w-10 h-10 rounded-xl" />
+                    <Skeleton className="h-5 w-32" />
+                  </div>
+                  <Skeleton className="h-10 w-24" />
+                  <Skeleton className="h-2 w-full rounded-full" />
+                </div>
+              ))}
+            </div>
+            <Skeleton className="h-5 w-48" />
+          </div>
+
+          {/* Available Plans Skeleton */}
+          <div className="space-y-6">
+            <Skeleton className="h-7 w-40" />
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="card-premium space-y-4 p-6">
+                  <Skeleton className="h-5 w-20" />
+                  <Skeleton className="h-10 w-32" />
+                  <div className="space-y-2">
+                    <Skeleton className="h-4 w-full" />
+                    <Skeleton className="h-4 w-full" />
+                    <Skeleton className="h-4 w-3/4" />
+                  </div>
+                  <Skeleton className="h-10 w-full rounded" />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Billing History Skeleton */}
+          <div className="space-y-6">
+            <Skeleton className="h-7 w-40" />
+            <div className="card-premium space-y-4">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="flex items-center justify-between py-3 border-b last:border-0">
+                  <div className="space-y-2">
+                    <Skeleton className="h-5 w-32" />
+                    <Skeleton className="h-4 w-48" />
+                  </div>
+                  <Skeleton className="h-9 w-24" />
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </MainLayout>
@@ -175,30 +249,7 @@ const Billing = () => {
           </div>
         </section>
 
-        {/* Payment Method Section (for paid users) */}
-        {isPaidSubscription && (
-          <section className="card-premium">
-            <h2 className="text-xl font-semibold mb-4">Payment Method</h2>
-            {subscription?.update_payment_url ? (
-              <div className="flex items-center justify-between">
-                <p className="text-muted-foreground">Manage your payment method through Paddle</p>
-                <Button variant="outline" asChild>
-                  <a
-                    href={subscription.update_payment_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <CreditCard className="w-4 h-4 mr-2" />
-                    Manage Payment
-                    <ExternalLink className="w-3 h-3 ml-1" />
-                  </a>
-                </Button>
-              </div>
-            ) : (
-              <p className="text-muted-foreground">Payment method on file with Paddle</p>
-            )}
-          </section>
-        )}
+
 
         {/* Billing History Section */}
         <BillingHistorySection

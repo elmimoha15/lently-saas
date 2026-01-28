@@ -122,7 +122,19 @@ async function apiRequest<T>(
       
       try {
         const errorBody = await response.json();
-        errorDetail = errorBody.detail || errorBody.message || errorDetail;
+        
+        // Handle structured error responses (e.g., quota_exceeded with current/limit)
+        if (typeof errorBody.detail === 'object' && errorBody.detail !== null) {
+          // For quota errors, include the key info in the message
+          const detail = errorBody.detail;
+          if (detail.error === 'quota_exceeded') {
+            errorDetail = `quota_exceeded: ${detail.message || 'Usage limit reached'}`;
+          } else {
+            errorDetail = detail.message || JSON.stringify(detail);
+          }
+        } else {
+          errorDetail = errorBody.detail || errorBody.message || errorDetail;
+        }
       } catch {
         // Response body is not JSON
         errorDetail = response.statusText || errorDetail;
@@ -590,6 +602,13 @@ export const billingApi = {
    */
   getTransactions: (limit: number = 10) =>
     api.get<{ transactions: TransactionData[] }>(`/api/billing/transactions?limit=${limit}`),
+
+  /**
+   * Get invoice PDF URL for a transaction
+   * Returns a temporary URL (expires in 1 hour) to view/download the invoice
+   */
+  getInvoicePdf: (transactionId: string, disposition: 'inline' | 'attachment' = 'inline') =>
+    api.get<{ url: string }>(`/api/billing/transactions/${transactionId}/invoice?disposition=${disposition}`),
 };
 
 export default api;

@@ -5,7 +5,7 @@
  * Redirects existing users to sign in instead.
  */
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Link, useNavigate } from 'react-router-dom';
 import { Flame, AlertCircle, Loader2 } from 'lucide-react';
@@ -20,20 +20,30 @@ const SignUp = () => {
   const [userName, setUserName] = useState<string | undefined>(undefined);
   const navigate = useNavigate();
   const { signUpWithGoogle, isAuthenticated, user, isLoading } = useAuth();
+  
+  // Use ref to track if we initiated sign-up to prevent flicker on auth state changes
+  const isSigningUpRef = React.useRef(false);
 
-  // Auto-redirect when user becomes authenticated after signup
+  // Redirect to dashboard if user is already authenticated and onboarded
+  // But NOT if we're in the middle of signing up
   useEffect(() => {
-    if (isAuthenticated && user && !isLoading) {
-      // If user just signed up and hasn't completed onboarding, redirect there
-      if (!user.hasCompletedOnboarding) {
-        console.log('New user authenticated, redirecting to onboarding...');
-        navigate('/onboarding', { replace: true });
-      }
+    if (isSigningUpRef.current) {
+      // We initiated sign-up, don't redirect based on auth state
+      return;
+    }
+    if (isAuthenticated && user && !isLoading && user.hasCompletedOnboarding) {
+      console.log('User already onboarded, redirecting to dashboard...');
+      navigate('/dashboard', { replace: true });
     }
   }, [isAuthenticated, user, isLoading, navigate]);
 
   const handleGoogleSignUp = async () => {
     setError(null);
+    
+    // Set loading state IMMEDIATELY before anything else
+    // This prevents any UI flicker
+    isSigningUpRef.current = true;
+    setIsSigningUp(true);
 
     try {
       const result = await signUpWithGoogle();
@@ -45,14 +55,13 @@ const SignUp = () => {
           setUserName(displayName.split(' ')[0]);
         }
         
-        // Small delay to ensure Google popup closes, then show progress
-        setTimeout(() => {
-          setIsSigningUp(true);
-          
-          // Progress bar will continue showing while onboarding loads
-          navigate('/onboarding', { replace: true });
-        }, 300);
+        // Navigate immediately - loading screen is already showing
+        navigate('/onboarding', { replace: true });
       } else if (result.error) {
+        // Reset loading state on error
+        isSigningUpRef.current = false;
+        setIsSigningUp(false);
+        
         // Handle specific error for existing users
         if (result.error.code === 'auth/account-exists') {
           setError('An account with this Google account already exists. Please sign in instead.');
@@ -61,12 +70,15 @@ const SignUp = () => {
         }
       }
     } catch (err) {
+      isSigningUpRef.current = false;
+      setIsSigningUp(false);
       setError('An unexpected error occurred. Please try again.');
     }
   };
 
-  // Show progress screen when signing up
-  if (isSigningUp) {
+  // Show progress screen when signing up OR when auth is loading after we initiated sign-up
+  // This prevents any flicker when the Google popup closes
+  if (isSigningUp || (isSigningUpRef.current && isLoading)) {
     return <SignInProgress userName={userName} message="Creating account" />;
   }
 

@@ -5,6 +5,8 @@ import { Check, AlertCircle, X, AlertTriangle } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Button } from '@/components/ui/button';
 import { useAnalysis } from '@/contexts/AnalysisContext';
+import { useBilling } from '@/contexts/BillingContext';
+import { useUpgradeModal } from '@/hooks/useUpgradeModal';
 import { useQueryClient } from '@tanstack/react-query';
 import type { AnalysisStep } from '@/types/analysis';
 import { toast } from 'sonner';
@@ -48,6 +50,32 @@ const Analyze = () => {
   const [url, setUrl] = useState('');
   const [isValid, setIsValid] = useState<boolean | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [shouldAutoStart, setShouldAutoStart] = useState(false);
+  
+  // Persist URL input when user navigates away
+  useEffect(() => {
+    if (url && !isAnalyzing) {
+      sessionStorage.setItem('lently_analyze_url', url);
+    } else if (!url) {
+      // Clear storage when URL is erased
+      sessionStorage.removeItem('lently_analyze_url');
+    }
+  }, [url, isAnalyzing]);
+  
+  // Restore URL on mount
+  useEffect(() => {
+    const stored = sessionStorage.getItem('lently_analyze_url');
+    if (stored && !url && !videoId) {
+      setUrl(stored);
+      // Validate the restored URL
+      const isYouTubeUrl = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$/i.test(stored);
+      setIsValid(isYouTubeUrl);
+    }
+  }, []);
+  
+  // Billing and upgrade modal
+  const { usage, canAnalyzeVideo, refreshBilling } = useBilling();
+  const { showUpgradeModal, handleQuotaError, pendingAction, clearPendingAction } = useUpgradeModal();
   const [analysisId, setAnalysisId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showCancelModal, setShowCancelModal] = useState(false);
@@ -56,6 +84,31 @@ const Analyze = () => {
   const { videoId } = useParams<{ videoId?: string }>();
   
   const { startAnalysis, getAnalysis, state } = useAnalysis();
+  
+  // Resume pending action after successful payment
+  useEffect(() => {
+    if (pendingAction?.type === 'analyze_video' && pendingAction.payload?.videoUrl && canAnalyzeVideo) {
+      // User just upgraded and can now analyze - resume the action
+      const videoUrl = pendingAction.payload.videoUrl;
+      clearPendingAction();
+      
+      // Set the URL and flag for auto-start
+      setUrl(videoUrl);
+      setIsValid(true);
+      setShouldAutoStart(true);
+      
+      toast.success('Welcome back! Starting your video analysis...');
+    }
+  }, [pendingAction, canAnalyzeVideo, clearPendingAction]);
+  
+  // Auto-start analysis when flag is set (after resuming from upgrade)
+  useEffect(() => {
+    if (shouldAutoStart && url && isValid && canAnalyzeVideo && !isAnalyzing) {
+      setShouldAutoStart(false);
+      // Trigger the analysis
+      handleAnalyzeFromResume();
+    }
+  }, [shouldAutoStart, url, isValid, canAnalyzeVideo, isAnalyzing]);
   
   // Helper function to check if the param is a UUID (analysis ID) or YouTube video ID
   const isUUID = (str: string) => {
@@ -191,9 +244,48 @@ const Analyze = () => {
     }
   };
 
+  // Function to start analysis (used for auto-resume after upgrade)
+  const handleAnalyzeFromResume = async () => {
+    if (!url || !validateUrl(url)) return;
+    
+    setError(null);
+    setIsAnalyzing(true);
+    
+    try {
+      const newAnalysisId = await startAnalysis(url);
+      
+      // Clear stored URL after successful start
+      sessionStorage.removeItem('lently_analyze_url');
+      
+      setAnalysisId(newAnalysisId);
+      refreshBilling();
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      setError(errorMessage);
+      setIsAnalyzing(false);
+    }
+  };
+
   const handleAnalyze = async () => {
     if (!validateUrl(url)) {
       setError('Please enter a valid YouTube URL');
+      return;
+    }
+    
+    // Pre-check: Show upgrade modal if already at limit (immediate feedback)
+    if (!canAnalyzeVideo) {
+      showUpgradeModal(
+        {
+          limitType: 'videos',
+          currentUsage: usage?.videos_used,
+          currentLimit: usage?.videos_limit,
+        },
+        // Store the pending action so we can resume after upgrade
+        {
+          type: 'analyze_video',
+          payload: { videoUrl: url },
+        }
+      );
       return;
     }
     
@@ -202,9 +294,41 @@ const Analyze = () => {
     
     try {
       const newAnalysisId = await startAnalysis(url);
+      
+      // Clear stored URL after successful start
+      sessionStorage.removeItem('lently_analyze_url');
+      
       setAnalysisId(newAnalysisId);
+      // Refresh billing after successful start to update usage counts
+      refreshBilling();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to start analysis');
+      // Check if this is a quota exceeded error (402 from backend)
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      
+      if (errorMessage.includes('quota_exceeded') || 
+          errorMessage.includes('video analyses') ||
+          errorMessage.includes('limit')) {
+        // Handle quota error - show upgrade modal with pending action
+        const handled = handleQuotaError(
+          {
+            error: 'quota_exceeded',
+            message: errorMessage,
+            current: usage?.videos_used || 0,
+            limit: usage?.videos_limit || 1,
+          },
+          {
+            type: 'analyze_video',
+            payload: { videoUrl: url },
+          }
+        );
+        
+        if (handled) {
+          setIsAnalyzing(false);
+          return;
+        }
+      }
+      
+      setError(errorMessage);
       setIsAnalyzing(false);
     }
   };

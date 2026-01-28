@@ -190,13 +190,18 @@ const VideoAnalysis = () => {
     negative: Math.round(sentiment.summary.negative_percentage),
   } : { positive: 33, neutral: 34, negative: 33 };
 
+  // Helper to sum multiple category names (backend uses different naming conventions)
+  const getCategoryCount = (counts: Record<string, number>, ...keys: string[]) => {
+    return keys.reduce((sum, key) => sum + (counts[key] || 0), 0);
+  };
+
   const categories = classification ? {
-    questions: classification.summary.category_counts['question'] || 0,
-    praise: classification.summary.category_counts['appreciation'] || classification.summary.category_counts['praise'] || 0,
-    complaints: classification.summary.category_counts['complaint'] || 0,
-    suggestions: classification.summary.category_counts['suggestion'] || 0,
-    spam: classification.summary.category_counts['spam'] || 0,
-    general: classification.summary.category_counts['discussion'] || classification.summary.category_counts['other'] || 0,
+    questions: getCategoryCount(classification.summary.category_counts, 'question'),
+    praise: getCategoryCount(classification.summary.category_counts, 'appreciation', 'praise', 'feedback'),
+    complaints: getCategoryCount(classification.summary.category_counts, 'complaint', 'criticism'),
+    suggestions: getCategoryCount(classification.summary.category_counts, 'suggestion', 'request'),
+    spam: getCategoryCount(classification.summary.category_counts, 'spam'),
+    general: getCategoryCount(classification.summary.category_counts, 'discussion', 'other'),
   } : { questions: 0, praise: 0, complaints: 0, suggestions: 0, spam: 0, general: 0 };
 
   const topics = insights?.key_themes?.slice(0, 8).map(t => t.theme) || [];

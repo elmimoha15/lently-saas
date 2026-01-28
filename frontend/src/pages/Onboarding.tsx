@@ -92,9 +92,9 @@ const Onboarding = () => {
         return;
       }
 
-      // For free plan: Complete onboarding and show complete step
-      console.log('[Onboarding] Completing onboarding with free plan');
-      await completeOnboarding(selectedGoals, selectedPlan);
+      // For free plan: Show complete step first, THEN complete onboarding when they click dashboard
+      // This ensures the user sees the complete step before being redirected
+      console.log('[Onboarding] Showing complete step for free plan');
       setStep('complete');
     } catch (err) {
       console.error('[Onboarding] Error:', err);
@@ -111,18 +111,21 @@ const Onboarding = () => {
   // =============================================================================
   const goToDashboard = async () => {
     console.log('[Onboarding] Navigating to dashboard');
-    // Onboarding should already be complete, but double-check
-    if (user && !user.hasCompletedOnboarding) {
-      console.log('[Onboarding] Marking onboarding complete before dashboard');
-      try {
-        await completeOnboarding(
-          selectedGoals.length > 0 ? selectedGoals : ['understand'],
-          selectedPlan
-        );
-      } catch (err) {
-        console.error('[Onboarding] Error completing onboarding:', err);
-      }
+    
+    // Always complete onboarding before navigating to dashboard
+    // This is the ONLY place where onboarding should be marked complete
+    // This ensures user MUST go through the complete step first
+    try {
+      console.log('[Onboarding] Completing onboarding before dashboard navigation');
+      await completeOnboarding(
+        selectedGoals.length > 0 ? selectedGoals : ['understand'],
+        selectedPlan
+      );
+    } catch (err) {
+      console.error('[Onboarding] Error completing onboarding:', err);
+      // Still navigate to dashboard even if there's an error
     }
+    
     navigate('/dashboard');
   };
 
@@ -136,7 +139,7 @@ const Onboarding = () => {
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center">
           <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-muted-foreground">Loading...</p>
+          <p className="text-muted-foreground">Creating your account</p>
         </div>
       </div>
     );

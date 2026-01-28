@@ -6,6 +6,8 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { AnalysisProvider } from "@/contexts/AnalysisContext";
 import { BillingProvider } from "@/contexts/BillingContext";
+import { UpgradeModalProvider } from "@/hooks/useUpgradeModal";
+import { GlobalUpgradeModal } from "@/components/billing";
 import { ProtectedRoute, PublicRoute, OnboardingRoute } from "@/components/auth/ProtectedRoute";
 import Index from "./pages/Index";
 import Videos from "./pages/Videos";
@@ -21,7 +23,20 @@ import SignUp from "./pages/SignUp";
 import Onboarding from "./pages/Onboarding";
 import NotFound from "./pages/NotFound";
 
-const queryClient = new QueryClient();
+// Configure QueryClient with aggressive caching to prevent unnecessary refetches
+// Data stays fresh for 5 minutes, cached for 30 minutes
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 5 * 60 * 1000, // Data is fresh for 5 minutes
+      gcTime: 30 * 60 * 1000, // Cache persists for 30 minutes (previously cacheTime)
+      refetchOnMount: false, // Don't refetch when component mounts if data is fresh
+      refetchOnWindowFocus: false, // Don't refetch when window regains focus
+      refetchOnReconnect: false, // Don't refetch on reconnect
+      retry: 1, // Only retry once on failure
+    },
+  },
+});
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -31,8 +46,10 @@ const App = () => (
       <BrowserRouter>
         <AuthProvider>
           <BillingProvider>
-            <AnalysisProvider>
-              <Routes>
+            <UpgradeModalProvider>
+              <AnalysisProvider>
+                <GlobalUpgradeModal />
+                <Routes>
             {/* Public routes - show landing page for unauthenticated users */}
             <Route path="/" element={<Landing />} />
             <Route path="/landing" element={<Landing />} />
@@ -148,11 +165,12 @@ const App = () => (
 
             {/* 404 */}
             <Route path="*" element={<NotFound />} />
-            </Routes>
-          </AnalysisProvider>
-        </BillingProvider>
-      </AuthProvider>
-    </BrowserRouter>
+                </Routes>
+              </AnalysisProvider>
+            </UpgradeModalProvider>
+          </BillingProvider>
+        </AuthProvider>
+      </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>
 );

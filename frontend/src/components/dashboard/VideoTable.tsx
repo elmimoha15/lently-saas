@@ -138,6 +138,24 @@ export const VideoTable = ({ videos, compact = false }: VideoTableProps) => {
         };
       });
       
+      // Invalidate conversations cache since they were deleted with the video
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      
+      // Check if the active conversation is for this video and clear it
+      const storedConversation = sessionStorage.getItem('lently_active_conversation');
+      if (storedConversation) {
+        try {
+          const state = JSON.parse(storedConversation);
+          if (state.videoId === videoToDelete.videoId) {
+            sessionStorage.removeItem('lently_active_conversation');
+            console.log('🗑️ Cleared active conversation for deleted video');
+          }
+        } catch (e) {
+          // Invalid JSON, clear it anyway
+          sessionStorage.removeItem('lently_active_conversation');
+        }
+      }
+      
       setVideoToDelete(null);
     } catch (error) {
       console.error('Delete error:', error);
@@ -401,7 +419,10 @@ export const VideoTable = ({ videos, compact = false }: VideoTableProps) => {
                     Delete Video Analysis?
                   </h3>
                   <p className="text-muted-foreground text-sm leading-relaxed">
-                    Are you sure you want to delete <span className="font-medium text-foreground">"{videoToDelete.title}"</span>? This action cannot be undone.
+                    Are you sure you want to delete <span className="font-medium text-foreground">"{videoToDelete.title}"</span>?
+                  </p>
+                  <p className="text-muted-foreground text-sm leading-relaxed mt-2">
+                    <span className="font-medium text-amber-600">Note:</span> This will also delete all AI conversations associated with this video. This action cannot be undone.
                   </p>
                 </div>
               </div>

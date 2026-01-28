@@ -1130,6 +1130,8 @@ class AskAIService:
             
         Returns:
             True if deleted successfully, False if not found or permission denied
+            
+        Note: This does NOT decrement usage counters. Usage reflects actual API usage, not current data.
         """
         try:
             # Check if conversation exists and belongs to user

@@ -28,6 +28,9 @@ interface BillingContextType {
   isLoading: boolean;
   error: Error | null;
   
+  // Loading states
+  isRedirecting: boolean;
+  
   // Convenient accessors
   usage: UsageData | null;
   subscription: SubscriptionData | null;
@@ -102,6 +105,7 @@ export const BillingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [isPaddleReady, setIsPaddleReady] = useState(false);
+  const [isRedirecting, setIsRedirecting] = useState(false);
   
   // Fetch billing info from backend (single source of truth) - MUST be defined first
   const {
@@ -119,8 +123,8 @@ export const BillingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       return response.data || null;
     },
     enabled: isAuthenticated,
-    staleTime: 30 * 1000, // Cache for 30 seconds
-    refetchOnWindowFocus: true,
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes - billing rarely changes
+    gcTime: 30 * 60 * 1000, // Keep in cache for 30 minutes
     retry: 2,
   });
   
@@ -131,7 +135,7 @@ export const BillingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       return;
     }
     
-    // Function to handle payment success - waits for webhook then reloads
+    // Function to handle payment success - waits for webhook then redirects
     const onPaymentSuccess = async () => {
       console.log('🎉 Payment success detected! Waiting for webhook processing...');
       
@@ -142,11 +146,59 @@ export const BillingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       
       // Wait for Paddle webhook to hit backend and update Firestore
       // Webhook flow: Paddle → Backend → Firestore
-      // We just need to wait and reload to get fresh data
       await new Promise(resolve => setTimeout(resolve, 3000));
       
-      console.log('Reloading page to fetch updated plan from Firestore...');
-      window.location.reload();
+      // Invalidate all queries to force fresh data
+      queryClient.invalidateQueries({ queryKey: ['billing'] });
+      queryClient.invalidateQueries({ queryKey: ['recentVideos'] });
+      queryClient.invalidateQueries({ queryKey: ['analysisHistory'] });
+      
+      // Check if there's a pending action to resume
+      const pendingActionStr = sessionStorage.getItem('lently_pending_action');
+      let redirectPath = '/dashboard';
+      
+      if (pendingActionStr) {
+        try {
+          const pendingAction = JSON.parse(pendingActionStr);
+          console.log('🔄 [PAYMENT SUCCESS] Found pending action:', pendingAction);
+          
+          if (pendingAction.type === 'analyze_video') {
+            // Redirect to analyze page - the pending action will be picked up there
+            redirectPath = '/analyze';
+            toast({
+              title: '🎬 Resuming your video analysis...',
+              description: 'Your upgrade is complete! Continuing where you left off.',
+            });
+          } else if (pendingAction.type === 'ask_ai') {
+            // Redirect to Ask AI page
+            redirectPath = pendingAction.payload?.videoId 
+              ? `/ai/${pendingAction.payload.videoId}`
+              : '/ai';
+            toast({
+              title: '🤖 Resuming Ask AI...',
+              description: 'Your upgrade is complete! Continuing where you left off.',
+            });
+          }
+        } catch (e) {
+          console.error('Failed to parse pending action:', e);
+          sessionStorage.removeItem('lently_pending_action');
+        }
+      } else {
+        // No pending action - default upgrade, redirect to dashboard
+        toast({title: '✨ Upgrade successful!',
+          description: 'Welcome to your new plan! Your dashboard has been updated.',
+        });
+      }
+      
+      console.log('🔄 [PAYMENT SUCCESS] Redirecting to:', redirectPath);
+      
+      // Show loading screen during redirect
+      setIsRedirecting(true);
+      
+      // Small delay to show loading screen, then redirect with full page reload
+      setTimeout(() => {
+        window.location.href = redirectPath;
+      }, 500);
     };
     
     const initPaddle = async () => {
@@ -182,7 +234,7 @@ export const BillingProvider: React.FC<{ children: React.ReactNode }> = ({ child
                   // Show user-friendly error message
                   toast({
                     title: 'Checkout Error',
-                    description: event.data?.error_message || 'The payment system encountered an error. Please check the console for details.',
+                    description: (event.data as any)?.error_message || 'The payment system encountered an error. Please check the console for details.',
                     variant: 'destructive',
                   });
                 }
@@ -365,11 +417,24 @@ export const BillingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         throw new Error(response.error.detail);
       }
       
+      // Reload billing state to reflect cancellation
+      console.log('🔄 [CANCEL] Reloading billing state...');
       await refreshBilling();
       
+      // Get the updated subscription to show end date
+      const endDate = billingInfo?.subscription?.current_period_end;
+      
+      const formattedDate = endDate 
+        ? new Date(endDate).toLocaleDateString('en-US', { 
+            month: 'long', 
+            day: 'numeric', 
+            year: 'numeric' 
+          })
+        : 'the end of your billing period';
+      
       toast({
-        title: 'Subscription cancelled',
-        description: 'Your subscription will end at the end of the billing period.',
+        title: '✅ Subscription will be cancelled',
+        description: `Your plan will remain active until ${formattedDate}. You won't be charged again.`,
       });
       
       return true;
@@ -382,12 +447,13 @@ export const BillingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       });
       return false;
     }
-  }, [refreshBilling, toast]);
+  }, [refreshBilling, toast, billingInfo]);
   
   const value: BillingContextType = {
     billingInfo: billingInfo || null,
     isLoading,
     error: error as Error | null,
+    isRedirecting,
     usage,
     subscription,
     plans,
@@ -409,6 +475,22 @@ export const BillingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   return (
     <BillingContext.Provider value={value}>
       {children}
+      
+      {/* Full-page loading screen during redirect */}
+      {isRedirecting && (
+        <div className="fixed inset-0 z-[9999] bg-background/95 backdrop-blur-sm flex items-center justify-center">
+          <div className="flex flex-col items-center gap-4">
+            <div className="relative">
+              <div className="w-16 h-16 border-4 border-primary/20 rounded-full" />
+              <div className="absolute inset-0 w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+            </div>
+            <div className="text-center">
+              <h3 className="text-lg font-semibold mb-1">Loading your new plan...</h3>
+              <p className="text-sm text-muted-foreground">Please wait a moment</p>
+            </div>
+          </div>
+        </div>
+      )}
     </BillingContext.Provider>
   );
 };

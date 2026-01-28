@@ -48,7 +48,7 @@ const Videos = () => {
   const itemsPerPage = 10;
   const { state: analysisState } = useAnalysis();
 
-  // Fetch video history from API with periodic refetch for processing videos
+  // Fetch video history from API - cached but polls if videos are processing
   const { data: historyData, isLoading, refetch } = useQuery({
     queryKey: ['analysisHistory'],
     queryFn: async () => {
@@ -58,13 +58,11 @@ const Videos = () => {
       }
       return response.data;
     },
-    staleTime: 0, // Always consider data stale
-    refetchOnMount: true, // Refetch when component mounts
-    refetchOnWindowFocus: true, // Refetch when window regains focus
-    refetchInterval: (data) => {
-      // If there are processing videos, poll every 2 seconds
+    // Smart polling: only poll if there are processing videos
+    refetchInterval: (query) => {
+      const data = query.state.data;
       const hasProcessing = data?.analyses?.some((a: any) => a.status === 'processing');
-      return hasProcessing ? 2000 : false;
+      return hasProcessing ? 2000 : false; // Poll every 2s only if processing
     },
   });
 

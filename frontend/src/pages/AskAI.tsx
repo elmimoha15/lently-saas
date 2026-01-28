@@ -3,6 +3,8 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { analysisApi, askAiApi } from '@/services/api.service';
 import { useBilling } from '@/contexts/BillingContext';
+import { useUpgradeModal } from '@/hooks/useUpgradeModal';
+import { toast } from 'sonner';
 import {
   Message,
   Conversation,
@@ -20,6 +22,7 @@ const AskAI = () => {
   
   // Get billing data from single source of truth
   const { usage, currentPlan, canAskQuestion, refreshBilling } = useBilling();
+  const { showUpgradeModal, handleQuotaError, pendingAction, clearPendingAction } = useUpgradeModal();
   
   // =========================================================================
   // State
@@ -41,11 +44,112 @@ const AskAI = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  // Resume pending action after successful payment
+  useEffect(() => {
+    if (hasStartedChat && conversationId && selectedVideoId) {
+      const state = {
+        conversationId,
+        videoId: selectedVideoId,
+        timestamp: Date.now(),
+      };
+      sessionStorage.setItem('lently_active_conversation', JSON.stringify(state));
+    }
+  }, [hasStartedChat, conversationId, selectedVideoId]);
+
+  // Restore conversation state on mount if no specific route/query params
+  useEffect(() => {
+    const shouldRestore = !routeVideoId && !loadConversationId;
+    
+    if (shouldRestore && isInitialLoad) {
+      const stored = sessionStorage.getItem('lently_active_conversation');
+      if (stored) {
+        try {
+          const state = JSON.parse(stored);
+          const ageMinutes = (Date.now() - state.timestamp) / (1000 * 60);
+          
+          // Restore if less than 24 hours old
+          if (ageMinutes < 1440 && state.conversationId && state.videoId) {
+            console.log('🔄 Restoring previous conversation:', state.conversationId);
+            
+            // First verify the conversation still exists by attempting to load it
+            // This will handle deleted conversations gracefully
+            setIsLoadingConversation(true);
+            loadConversation(state.conversationId).then(success => {
+              if (!success) {
+                // Conversation was deleted, show initial view
+                setIsInitialLoad(false);
+              } else if (state.messages && state.messages.length > 0) {
+                // Successfully loaded, use cached messages if available
+                setMessages(state.messages);
+              }
+              // Navigate to the conversation URL if successful
+              if (success) {
+                navigate(`/ai?conversation=${state.conversationId}`, { replace: true });
+              }
+            });
+          } else {
+            // Clear stale data
+            sessionStorage.removeItem('lently_active_conversation');
+            setIsInitialLoad(false);
+          }
+        } catch (e) {
+          console.error('Failed to restore conversation:', e);
+          sessionStorage.removeItem('lently_active_conversation');
+          setIsInitialLoad(false);
+        }
+      } else {
+        setIsInitialLoad(false);
+      }
+    } else if (routeVideoId || loadConversationId) {
+      // If there's a specific route param, don't restore from storage
+      setIsInitialLoad(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeVideoId, loadConversationId, isInitialLoad]);
+
+  // Persist conversation state when user navigates away
+  useEffect(() => {
+    if (hasStartedChat && conversationId && selectedVideoId) {
+      const state = {
+        conversationId,
+        videoId: selectedVideoId,
+        messages: messages, // Save messages to avoid reloading
+        timestamp: Date.now(),
+      };
+      sessionStorage.setItem('lently_active_conversation', JSON.stringify(state));
+    }
+  }, [hasStartedChat, conversationId, selectedVideoId, messages]);
+
+  // Resume pending action after successful payment
+  useEffect(() => {
+    if (pendingAction?.type === 'ask_ai' && canAskQuestion) {
+      // User just upgraded and can now ask - resume the action
+      const { question, videoId } = pendingAction.payload || {};
+      clearPendingAction();
+      
+      if (videoId) {
+        setSelectedVideoId(videoId);
+      }
+      
+      if (question) {
+        setInput(question);
+        toast.success('Welcome back! Your question is ready to send.');
+      } else {
+        toast.success('Welcome back! You can now ask AI questions.');
+      }
+      
+      // Focus the input so user can easily submit
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 300);
+    }
+  }, [pendingAction, canAskQuestion, clearPendingAction]);
+
   // =========================================================================
   // Data Fetching
   // =========================================================================
 
-  // Fetch conversation history list
+  // Fetch conversation history list - cached for fast navigation
   const { data: conversationsData, refetch: refetchConversations, isLoading: isLoadingConversations } = useQuery({
     queryKey: ['conversations'],
     queryFn: async () => {
@@ -53,11 +157,13 @@ const AskAI = () => {
       if (response.error) return null;
       return response.data;
     },
+    // Conversations are cached and don't need frequent refetching
+    staleTime: 10 * 60 * 1000, // Stay fresh for 10 minutes
   });
 
   const conversations: Conversation[] = conversationsData?.conversations || [];
 
-  // Fetch analyzed videos for the selector
+  // Fetch analyzed videos for the selector - shared with Videos page cache
   const { data: historyData, isLoading: isLoadingVideos } = useQuery({
     queryKey: ['analysisHistory'],
     queryFn: async () => {
@@ -65,6 +171,7 @@ const AskAI = () => {
       if (response.error) throw new Error(response.error.detail);
       return response.data;
     },
+    // Uses global cache settings - shares data with Videos page
   });
 
   // Convert to video options - only completed analyses
@@ -165,16 +272,33 @@ const AskAI = () => {
         setConversationId(convId);
         setHasStartedChat(true);
         setIsInitialLoad(false);
+        return true; // Success
+      } else {
+        // Conversation not found
+        throw new Error('Conversation not found');
       }
     } catch (err) {
       console.error('Failed to load conversation:', err);
-      setError('Failed to load conversation');
+      
+      // If conversation doesn't exist (was deleted), clear storage and reset
+      if (err instanceof Error && (err.message.includes('not found') || err.message.includes('404'))) {
+        console.log('🗑️ Conversation no longer exists, clearing storage');
+        sessionStorage.removeItem('lently_active_conversation');
+        setHasStartedChat(false);
+        setMessages([]);
+        setConversationId(null);
+        setSelectedVideoId('');
+        navigate('/ai', { replace: true });
+      } else {
+        setError('Failed to load conversation');
+      }
+      return false; // Failed
     } finally {
       setIsLoadingConversation(false);
     }
   };
 
-  const handleLoadConversation = (convId: string, videoId: string) => {
+  const handleLoadConversation = useCallback((convId: string, videoId: string) => {
     // Immediately switch to chat view and navigate
     setConversationId(convId);
     setSelectedVideoId(videoId);
@@ -185,7 +309,7 @@ const AskAI = () => {
     
     // Load conversation data in background
     loadConversation(convId);
-  };
+  }, [navigate]);
 
   // =========================================================================
   // Ask Question Mutation
@@ -226,7 +350,31 @@ const AskAI = () => {
       }
     },
     onError: (error: Error) => {
-      setError(error.message);
+      // Check if this is a quota exceeded error (402 from backend)
+      const errorMessage = error.message;
+      
+      if (errorMessage.includes('quota_exceeded') || 
+          errorMessage.includes('AI question') ||
+          errorMessage.includes('question limit')) {
+        // Handle quota error - show upgrade modal with pending action
+        handleQuotaError(
+          {
+            error: 'quota_exceeded',
+            message: errorMessage,
+            current: usage?.ai_questions_used || 0,
+            limit: usage?.ai_questions_limit || 2,
+          },
+          {
+            type: 'ask_ai',
+            payload: { 
+              videoId: selectedVideoId,
+            },
+          }
+        );
+        return;
+      }
+      
+      setError(errorMessage);
     },
   });
 
@@ -240,7 +388,21 @@ const AskAI = () => {
     
     // Check quota before allowing question (frontend enforcement)
     if (!canAskQuestion) {
-      setError('You have reached your AI question limit for this month. Please upgrade your plan to continue.');
+      showUpgradeModal(
+        {
+          limitType: 'ai_questions',
+          currentUsage: usage?.ai_questions_used,
+          currentLimit: usage?.ai_questions_limit,
+        },
+        // Store the pending action so we can resume after upgrade
+        {
+          type: 'ask_ai',
+          payload: { 
+            question: messageText,
+            videoId: selectedVideoId,
+          },
+        }
+      );
       return;
     }
     
@@ -330,8 +492,9 @@ const AskAI = () => {
       };
     });
     
-    // If we deleted the current conversation, reset the chat
+    // If we deleted the current conversation, reset the chat and clear storage
     if (conversationIdToDelete === conversationId) {
+      sessionStorage.removeItem('lently_active_conversation');
       handleNewConversation();
     }
     
